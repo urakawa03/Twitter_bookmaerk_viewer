@@ -119,12 +119,22 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
   color:var(--sub); font-size:13px;
 }
 .cfoot .sp{flex:1}
-.fchips{display:flex; gap:4px; flex-wrap:wrap; margin-top:8px; padding-top:8px; border-top:1px solid var(--line)}
+.fchips{
+  display:flex; gap:6px 10px; flex-wrap:wrap; margin-top:8px; padding-top:8px;
+  border-top:1px solid var(--line); align-items:flex-start;
+}
 .fchip{
   font-size:12px; padding:2px 10px; border-radius:12px; border:1px solid var(--line);
   background:var(--chip); color:var(--sub);
 }
 .fchip.on{background:var(--chip-on); border-color:var(--chip-on); color:#fff}
+/* 親フォルダから子がぶら下がるグループ表示 */
+.fgroup{display:flex; flex-direction:column; gap:3px; align-items:flex-start}
+.fkids{
+  display:flex; flex-wrap:wrap; gap:3px;
+  margin-left:11px; padding-left:8px; border-left:2px solid var(--line);
+}
+.fchip.ghost{opacity:.55; cursor:default; background:transparent}
 
 #sentinel{height:1px}
 
@@ -171,10 +181,16 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 .t-foot{
   background:var(--card); border-top:1px solid var(--line); padding:10px 16px 14px;
 }
-.t-folders{display:flex; gap:6px; flex-wrap:wrap; max-width:720px; margin:0 auto 8px}
+.t-folders{display:flex; gap:8px 14px; flex-wrap:wrap; max-width:720px; margin:0 auto 8px; align-items:flex-start}
 .t-fbtn{
   padding:8px 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg);
 }
+.t-fgroup{display:flex; flex-direction:column; gap:4px; align-items:flex-start}
+.t-fkids{
+  display:flex; flex-wrap:wrap; gap:4px;
+  margin-left:14px; padding-left:10px; border-left:2px solid var(--line);
+}
+.t-fbtn.ghost{opacity:.55; cursor:default}
 .t-fbtn b{
   display:inline-block; min-width:18px; text-align:center; background:var(--ink); color:#fff;
   border-radius:4px; font-size:12px; margin-right:6px;
@@ -1004,10 +1020,21 @@ function quoteInner(q, qid, dt){
     + (qid ? `<div style="margin-top:4px"><a href="https://x.com/i/status/${esc(qid)}" target="_blank" rel="noopener" style="font-size:12px">元の投稿</a></div>` : '');
 }
 
+/* フォルダチップ: サブフォルダは親チップの下にツリー状にぶら下げる */
+function folderChipsHTML(it){
+  const chip = (f, label) =>
+    `<button class="fchip${it.c === f ? ' on' : ''}" data-assign="${esc(f)}" data-id="${esc(it.id)}" title="${it.c === f ? '割当を解除' : 'このフォルダに割当'}">${esc(label)}</button>`;
+  return buildGroups().map(g => {
+    if (!g.children.length) return g.parent ? chip(g.parent, g.parent) : '';
+    /* 親が削除済みでも子は残る: 親部分は飾りラベルにする */
+    const head = g.parent ? chip(g.parent, g.parent + '/') : `<span class="fchip ghost">${esc(g.key)}/</span>`;
+    const kids = g.children.map(f => chip(f, '/' + f.slice(g.key.length + 1))).join('');
+    return `<div class="fgroup">${head}<div class="fkids">${kids}</div></div>`;
+  }).join('');
+}
+
 function cardHTML(it, opts = {}){
-  const chips = state.folders.map(f =>
-    `<button class="fchip${it.c === f ? ' on' : ''}" data-assign="${esc(f)}" data-id="${esc(it.id)}" title="${it.c === f ? '割当を解除' : 'このフォルダに割当'}">${esc(f)}</button>`
-  ).join('');
+  const chips = folderChipsHTML(it);
   return `<article class="card" data-cid="${esc(it.id)}">`
     + `<div class="chead">`
     +   (it.avatar ? `<img class="avatar" data-kind="avatar" loading="lazy" src="${esc(it.avatar)}" alt="">` : `<span class="avatar"></span>`)
@@ -1085,7 +1112,7 @@ function renderTabs(){
       html += tab(f, f, direct[f] + kids.reduce((s, k) => s + direct[k], 0));
     } else {
       const p = f.slice(0, slash);
-      const label = state.folders.includes(p) ? '└ ' + f.slice(slash + 1) : f;
+      const label = state.folders.includes(p) ? '/' + f.slice(slash + 1) : f;
       html += tab(f, label, direct[f]);
     }
   }
@@ -1331,10 +1358,17 @@ function renderTriage(){
   const assigned = triage.stack.filter(e => e.action === 'assign').length;
   const skipped = triage.stack.filter(e => e.action === 'skip').length;
   $('#t-stat').textContent = `割当 ${assigned} / スキップ ${skipped}`;
-  $('#t-folders').innerHTML = state.folders.map((f, i) =>
-    i < 9 ? `<button class="t-fbtn" data-tassign="${esc(f)}"><b>${i + 1}</b>${esc(f)}</button>`
-          : `<button class="t-fbtn" data-tassign="${esc(f)}">${esc(f)}</button>`
-  ).join('');
+  const tbtn = (f, label) => {
+    const i = state.folders.indexOf(f);
+    const key = i > -1 && i < 9 ? `<b>${i + 1}</b>` : '';
+    return `<button class="t-fbtn" data-tassign="${esc(f)}">${key}${esc(label)}</button>`;
+  };
+  $('#t-folders').innerHTML = buildGroups().map(g => {
+    if (!g.children.length) return g.parent ? tbtn(g.parent, g.parent) : '';
+    const head = g.parent ? tbtn(g.parent, g.parent + '/') : `<span class="t-fbtn ghost">${esc(g.key)}/</span>`;
+    const kids = g.children.map(f => tbtn(f, '/' + f.slice(g.key.length + 1))).join('');
+    return `<div class="t-fgroup">${head}<div class="t-fkids">${kids}</div></div>`;
+  }).join('');
   const body = $('#t-body');
   if (done){
     body.innerHTML = `<div class="t-done">🎉 未分類アイテムの整理が終わりました。<br>「終了」または <kbd>Esc</kbd> で戻ります。</div>`;
