@@ -447,6 +447,42 @@ async function saveItems(arr){
   try { await store.putItems(arr); } catch (e){ console.warn('items保存失敗', e); }
 }
 
+/* 閲覧状態（検索・絞り込み・タブ・ソート・スクロール位置）の記憶 */
+let booting = true;
+let vsTimer = null;
+function persistViewStateNow(){
+  if (!store.ok || booting) return;
+  try { store.setMeta('viewstate', { view: { ...state.view }, y: window.scrollY }); } catch (e){}
+}
+function persistViewState(){
+  if (!store.ok || booting) return;
+  clearTimeout(vsTimer);
+  vsTimer = setTimeout(persistViewStateNow, 300);
+}
+function applyViewState(vs){
+  if (!vs || !vs.view) return;
+  const v = vs.view;
+  state.view = {
+    q: typeof v.q === 'string' ? v.q : '',
+    media: !!v.media, quote: !!v.quote, long: !!v.long,
+    user: v.user || null,
+    sort: SORTS[v.sort] ? v.sort : 'new',
+    folder: v.folder || '__all',
+  };
+  const f = state.view.folder;
+  if (f !== '__all' && f !== '__none' && !state.folders.includes(f)) state.view.folder = '__all';
+  $('#search').value = state.view.q;
+}
+function restoreScroll(y){
+  if (!y) return;
+  /* 保存位置まで届くようチャンクを先に展開してからスクロール */
+  let guard = 0;
+  while (state.rendered < state.cur.length
+      && document.documentElement.scrollHeight < y + window.innerHeight
+      && guard++ < 500) appendChunk();
+  window.scrollTo(0, y);
+}
+
 /* ================= CSV parsing ================= */
 function parseCSV(text){
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // UTF-8 BOM
@@ -717,7 +753,10 @@ function downloadBackup(){
 /* ================= filtering / sorting ================= */
 function itemMatches(it, v){
   if (v.folder === '__none'){ if (it.c) return false; }
-  else if (v.folder !== '__all'){ if (it.c !== v.folder) return false; }
+  else if (v.folder !== '__all'){
+    /* 親フォルダのタブはサブフォルダ（親/子）も含めて表示 */
+    if (!(it.c === v.folder || (it.c && it.c.startsWith(v.folder + '/')))) return false;
+  }
   if (v.media && !(it.media && it.media.length)) return false;
   if (v.quote && !(it.quoted_id || it.qd)) return false;
   if (v.long && it.text.length < 300) return false;
@@ -851,6 +890,7 @@ function renderList(){
   const total = state.items.size;
   const shown = state.cur.length;
   $('#count').textContent = shown === total ? `${total} 件` : `${shown} / ${total} 件`;
+  persistViewState();
 }
 
 function appendChunk(){
@@ -863,18 +903,34 @@ function appendChunk(){
   state.rendered = end;
 }
 
-function renderTabs(){
-  const counts = { '': 0 };
-  for (const f of state.folders) counts[f] = 0;
+function folderCounts(){
+  const direct = { '': 0 };
+  for (const f of state.folders) direct[f] = 0;
   for (const it of state.items.values()){
-    if (it.c && counts[it.c] !== undefined) counts[it.c]++;
-    else if (!it.c) counts['']++;
+    if (!it.c) direct['']++;
+    else if (direct[it.c] !== undefined) direct[it.c]++;
   }
+  return direct;
+}
+
+function renderTabs(){
+  const direct = folderCounts();
   const t = state.view.folder;
   const tab = (key, label, n) =>
     `<button class="tab${t === key ? ' on' : ''}" data-tab="${esc(key)}">${esc(label)}<span class="n">${n}</span></button>`;
-  let html = tab('__all', 'すべて', state.items.size) + tab('__none', '未分類', counts['']);
-  for (const f of state.folders) html += tab(f, f, counts[f]);
+  let html = tab('__all', 'すべて', state.items.size) + tab('__none', '未分類', direct['']);
+  for (const f of state.folders){
+    const slash = f.indexOf('/');
+    if (slash === -1){
+      /* 親（または通常フォルダ）: サブフォルダ分を集計した件数を表示 */
+      const kids = state.folders.filter(k => k.startsWith(f + '/'));
+      html += tab(f, f, direct[f] + kids.reduce((s, k) => s + direct[k], 0));
+    } else {
+      const p = f.slice(0, slash);
+      const label = state.folders.includes(p) ? '└ ' + f.slice(slash + 1) : f;
+      html += tab(f, label, direct[f]);
+    }
+  }
   $('#tabs').innerHTML = html;
 }
 
@@ -899,12 +955,16 @@ function renderAll(){
 /* ================= data dialog ================= */
 function renderDataDialog(){
   const fl = $('#folder-list');
-  fl.innerHTML = state.folders.map((f, i) => {
-    let n = 0;
-    for (const it of state.items.values()) if (it.c === f) n++;
-    return `<li><span>${esc(f)}</span><span class="n" style="color:var(--sub);font-size:12px">${n}件</span><span class="sp"></span>`
-      + `<button class="mini" data-rename="${i}">改名</button>`
-      + `<button class="mini danger" data-delfolder="${i}">削除</button></li>`;
+  const direct = folderCounts();
+  fl.innerHTML = state.folders.map(f => {
+    const isChild = f.includes('/');
+    const label = isChild ? '└ ' + esc(f) : esc(f);
+    return `<li>${isChild ? '<span style="width:10px"></span>' : ''}<span>${label}</span>`
+      + `<span class="n" style="color:var(--sub);font-size:12px">${direct[f]}件</span><span class="sp"></span>`
+      + `<button class="mini" data-up="${esc(f)}" title="上へ">↑</button>`
+      + `<button class="mini" data-down="${esc(f)}" title="下へ">↓</button>`
+      + `<button class="mini" data-rename="${esc(f)}">改名</button>`
+      + `<button class="mini danger" data-delfolder="${esc(f)}">削除</button></li>`;
   }).join('');
   const hl = $('#history-list');
   hl.innerHTML = state.history.length
@@ -916,32 +976,100 @@ function renderDataDialog(){
     : '⚠ 保存不可モード: データはメモリ上のみです';
 }
 
+/* フォルダの親子グループ化: 「親/子」は親の直後にまとめて並べる */
+function buildGroups(){
+  const groups = [], map = new Map();
+  for (const f of state.folders){
+    const slash = f.indexOf('/');
+    const key = slash === -1 ? f : f.slice(0, slash);
+    let g = map.get(key);
+    if (!g){ g = { key, parent: null, children: [] }; map.set(key, g); groups.push(g); }
+    if (slash === -1) g.parent = f; else g.children.push(f);
+  }
+  return groups;
+}
+function flattenGroups(groups){
+  return groups.flatMap(g => (g.parent ? [g.parent] : []).concat(g.children));
+}
+function normalizeFolderOrder(){
+  state.folders = flattenGroups(buildGroups());
+}
+function validateFolderName(name){
+  if (!name) return 'フォルダ名を入力してください';
+  const parts = name.split('/');
+  if (parts.length > 2) return 'サブフォルダは「親/子」の1階層までです';
+  if (parts.some(p => p.trim() === '')) return 'フォルダ名の先頭・末尾に / は使えません';
+  return null;
+}
+
 async function addFolder(name){
   name = name.trim();
   if (!name) return;
+  const err = validateFolderName(name);
+  if (err){ toast(err); return; }
   if (state.folders.includes(name)){ toast('同名のフォルダがあります'); return; }
   state.folders.push(name);
+  normalizeFolderOrder();
   await saveMeta();
   renderAll();
 }
-async function renameFolder(i){
-  const old = state.folders[i];
+async function moveFolder(name, dir){
+  const groups = buildGroups();
+  const slash = name.indexOf('/');
+  if (slash === -1){
+    /* 親（または通常フォルダ）はサブフォルダごとブロックで移動 */
+    const gi = groups.findIndex(g => g.parent === name);
+    const ni = gi + dir;
+    if (gi < 0 || ni < 0 || ni >= groups.length) return;
+    [groups[gi], groups[ni]] = [groups[ni], groups[gi]];
+  } else {
+    /* 子は同じ親の中で移動 */
+    const g = groups.find(x => x.key === name.slice(0, slash));
+    if (!g) return;
+    const si = g.children.indexOf(name), ni = si + dir;
+    if (si < 0 || ni < 0 || ni >= g.children.length) return;
+    [g.children[si], g.children[ni]] = [g.children[ni], g.children[si]];
+  }
+  state.folders = flattenGroups(groups);
+  await saveMeta();
+  renderAll();
+}
+async function renameFolder(old){
+  const i = state.folders.indexOf(old);
+  if (i === -1) return;
   const name = prompt(`フォルダ「${old}」の新しい名前`, old);
-  if (!name || name.trim() === '' || name === old) return;
+  if (!name || name.trim() === '' || name.trim() === old) return;
   const nn = name.trim();
+  const err = validateFolderName(nn);
+  if (err){ toast(err); return; }
   if (state.folders.includes(nn)){ toast('同名のフォルダがあります'); return; }
+  const isParent = !old.includes('/');
+  const sub = f => nn + '/' + f.slice(old.length + 1);
   state.folders[i] = nn;
+  if (isParent){
+    /* 親の改名はサブフォルダ名も追随 */
+    for (let j = 0; j < state.folders.length; j++){
+      if (state.folders[j].startsWith(old + '/')) state.folders[j] = sub(state.folders[j]);
+    }
+  }
   const changed = [];
-  for (const it of state.items.values()) if (it.c === old){ it.c = nn; changed.push(it); }
+  for (const it of state.items.values()){
+    if (it.c === old){ it.c = nn; changed.push(it); }
+    else if (isParent && it.c.startsWith(old + '/')){ it.c = sub(it.c); changed.push(it); }
+  }
   if (state.view.folder === old) state.view.folder = nn;
+  else if (isParent && state.view.folder.startsWith(old + '/')) state.view.folder = sub(state.view.folder);
+  normalizeFolderOrder();
   await saveItems(changed);
   await saveMeta();
   renderAll();
 }
-async function deleteFolder(i){
-  const f = state.folders[i];
-  if (!confirm(`フォルダ「${f}」を削除しますか？\n中のアイテムは未分類に戻ります。`)) return;
-  state.folders.splice(i, 1);
+async function deleteFolder(f){
+  if (!state.folders.includes(f)) return;
+  const kids = f.includes('/') ? [] : state.folders.filter(k => k.startsWith(f + '/'));
+  const note = kids.length ? `\n（サブフォルダ ${kids.length} 件は残ります）` : '';
+  if (!confirm(`フォルダ「${f}」を削除しますか？\n中のアイテムは未分類に戻ります。${note}`)) return;
+  state.folders.splice(state.folders.indexOf(f), 1);
   const changed = [];
   for (const it of state.items.values()) if (it.c === f){ it.c = ''; changed.push(it); }
   if (state.view.folder === f) state.view.folder = '__all';
@@ -1147,10 +1275,14 @@ function bindEvents(){
     if (e.key === 'Enter'){ addFolder(e.target.value); e.target.value = ''; }
   });
   $('#folder-list').addEventListener('click', e => {
+    const u = e.target.closest('[data-up]');
+    if (u){ moveFolder(u.dataset.up, -1); return; }
+    const dn = e.target.closest('[data-down]');
+    if (dn){ moveFolder(dn.dataset.down, 1); return; }
     const r = e.target.closest('[data-rename]');
-    if (r){ renameFolder(+r.dataset.rename); return; }
+    if (r){ renameFolder(r.dataset.rename); return; }
     const d = e.target.closest('[data-delfolder]');
-    if (d){ deleteFolder(+d.dataset.delfolder); return; }
+    if (d){ deleteFolder(d.dataset.delfolder); return; }
   });
   $('#btn-backup').addEventListener('click', downloadBackup);
   $('#btn-wipe').addEventListener('click', wipeAll);
@@ -1187,6 +1319,13 @@ function bindEvents(){
     }
   });
 
+  /* 閲覧位置の記録 */
+  window.addEventListener('scroll', persistViewState, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') persistViewStateNow();
+  });
+  window.addEventListener('pagehide', persistViewStateNow);
+
   /* 段階描画: 番兵が見えたら次チャンク */
   const io = new IntersectionObserver(entries => {
     if (entries.some(en => en.isIntersecting)) appendChunk();
@@ -1197,18 +1336,23 @@ function bindEvents(){
 /* ================= boot ================= */
 async function boot(){
   await store.init();
+  let vs = null;
   if (store.ok){
     try {
-      const [items, folders, history] = await Promise.all([
-        store.getAllItems(), store.getMeta('folders'), store.getMeta('history'),
+      const [items, folders, history, viewstate] = await Promise.all([
+        store.getAllItems(), store.getMeta('folders'), store.getMeta('history'), store.getMeta('viewstate'),
       ]);
       for (const it of items) state.items.set(it.id, it);
       if (Array.isArray(folders) && folders.length) state.folders = folders;
       if (Array.isArray(history)) state.history = history;
+      vs = viewstate;
     } catch (e){ console.warn('読込失敗', e); }
   }
+  applyViewState(vs);
   bindEvents();
   renderAll();
+  booting = false;
+  if (vs && vs.y) restoreScroll(vs.y);
 }
 
 /* テスト用フック（外部送信なし・ローカル検証専用） */
