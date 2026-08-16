@@ -119,6 +119,13 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
   color:var(--sub); font-size:13px;
 }
 .cfoot .sp{flex:1}
+.trashbtn{
+  border:1px solid var(--line); background:var(--card); color:var(--sub);
+  border-radius:12px; padding:1px 10px; font-size:12px;
+}
+.trashbtn:hover{color:var(--danger); border-color:var(--danger)}
+.trashbtn.restore{color:var(--accent); border-color:var(--accent)}
+.card.trashed{opacity:.75; background:var(--bg)}
 .fchips{
   display:flex; gap:6px 10px; flex-wrap:wrap; margin-top:8px; padding-top:8px;
   border-top:1px solid var(--line); align-items:flex-start;
@@ -230,7 +237,9 @@ kbd{
       <option value="new">新しい順</option>
       <option value="old">古い順</option>
       <option value="fav">いいね数順</option>
+      <option value="rand">ランダム</option>
     </select>
+    <button class="tbtn" id="btn-shuffle" hidden title="並びをシャッフル">🔀 シャッフル</button>
     <button class="tbtn" id="f-media">メディア</button>
     <button class="tbtn" id="f-quote">引用</button>
     <button class="tbtn" id="f-long">長文</button>
@@ -410,7 +419,7 @@ const state = {
   items: new Map(),                 // id -> item
   folders: DEFAULT_FOLDERS.slice(),
   history: [],                      // {name, added, dup, date}
-  view: { q: '', media: false, quote: false, long: false, user: null, sort: 'new', folder: '__all' },
+  view: { q: '', media: false, quote: false, long: false, user: null, sort: 'new', seed: 0, folder: '__all' },
   cur: [],                          // filtered+sorted array
   rendered: 0,
   lastBackupAt: null,
@@ -540,6 +549,7 @@ function mergeArchive(data){
         if (!state.folders.includes(ex.c)) state.folders.push(ex.c);
       }
       if (!ex.qd && raw.qd && typeof raw.qd === 'object'){ ex.qd = raw.qd; changed.push(ex); }
+      if (!ex.tr && Number(raw.tr)){ ex.tr = Number(raw.tr); changed.push(ex); }
     }
   }
   if (Array.isArray(data.history)){
@@ -637,11 +647,13 @@ function applyViewState(vs){
     q: typeof v.q === 'string' ? v.q : '',
     media: !!v.media, quote: !!v.quote, long: !!v.long,
     user: v.user || null,
-    sort: SORTS[v.sort] ? v.sort : 'new',
+    sort: (v.sort === 'rand' || SORTS[v.sort]) ? v.sort : 'new',
+    seed: Number(v.seed) || 0,
     folder: v.folder || '__all',
   };
   const f = state.view.folder;
-  if (f !== '__all' && f !== '__none' && !state.folders.includes(f)) state.view.folder = '__all';
+  if (f !== '__all' && f !== '__none' && f !== '__trash' && !state.folders.includes(f)) state.view.folder = '__all';
+  if (state.view.sort === 'rand' && !state.view.seed) state.view.seed = 1;
   $('#search').value = state.view.q;
 }
 function restoreScroll(y){
@@ -714,6 +726,7 @@ function normalizeRecord(rec){
     views: String(rec.views_count ?? '').trim() === '' ? null : toInt(rec.views_count),
     url: normalizeUrl(rec.url || `https://x.com/i/status/${id}`),
     c: '',        // フォルダ割当（未分類 = ''）
+    tr: 0,        // ゴミ箱に入れた時刻（0 = 通常表示）
     qd: null,     // 引用データ（metadata 付き JSON から抽出）
   };
 }
@@ -835,6 +848,9 @@ async function restoreBackup(data, fname){
       dup++;
       /* 既存には割当（c）のみ適用 */
       if (raw.c && raw.c !== ex.c){ ex.c = raw.c; changed.push(ex); }
+      /* ゴミ箱状態も手作業の資産なのでバックアップから復元する */
+      const tr = Number(raw.tr) || 0;
+      if (tr !== (ex.tr || 0)){ ex.tr = tr; changed.push(ex); }
     } else {
       const it = normalizeBackupItem(raw);
       if (it){ state.items.set(it.id, it); changed.push(it); added++; }
@@ -866,6 +882,7 @@ function normalizeBackupItem(raw){
     views: raw.views == null ? null : toInt(raw.views),
     url: normalizeUrl(raw.url || `https://x.com/i/status/${id}`),
     c: typeof raw.c === 'string' ? raw.c : '',
+    tr: Number(raw.tr) || 0,
     qd: raw.qd && typeof raw.qd === 'object' ? raw.qd : null,
   };
 }
@@ -926,6 +943,9 @@ function downloadBackup(){
 
 /* ================= filtering / sorting ================= */
 function itemMatches(it, v){
+  /* ゴミ箱: 通常ビューからは除外し、ゴミ箱タブでのみ表示（データ自体は保持） */
+  if (v.folder === '__trash') return !!it.tr;
+  if (it.tr) return false;
   if (v.folder === '__none'){ if (it.c) return false; }
   else if (v.folder !== '__all'){
     /* 親フォルダのタブはサブフォルダ（親/子）も含めて表示 */
@@ -947,7 +967,21 @@ const SORTS = {
   new: (a, b) => b.ts - a.ts || (b.id < a.id ? -1 : 1),
   old: (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1),
   fav: (a, b) => b.fav - a.fav || b.ts - a.ts,
+  rand: null,   /* シード付きシャッフル（computeCur で特別扱い） */
 };
+/* id とシードから決まる安定した並び順。スクロール追加描画や再描画で並びが変わらない */
+function randKey(id, seed){
+  let h = 2166136261 ^ seed;
+  for (let i = 0; i < id.length; i++){
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 13;
+  return (h >>> 0);
+}
+function newSeed(){
+  return ((Date.now() ^ (state.view.seed * 0x9e3779b9)) >>> 0) || 1;
+}
 
 /* ================= rendering ================= */
 const CHUNK = 60;
@@ -1035,7 +1069,7 @@ function folderChipsHTML(it){
 
 function cardHTML(it, opts = {}){
   const chips = folderChipsHTML(it);
-  return `<article class="card" data-cid="${esc(it.id)}">`
+  return `<article class="card${it.tr ? ' trashed' : ''}" data-cid="${esc(it.id)}">`
     + `<div class="chead">`
     +   (it.avatar ? `<img class="avatar" data-kind="avatar" loading="lazy" src="${esc(it.avatar)}" alt="">` : `<span class="avatar"></span>`)
     +   `<div class="who"><div class="nm">${esc(it.name)}${it.text.length >= 300 ? '<span class="longmark">長文</span>' : ''}</div>`
@@ -1052,8 +1086,12 @@ function cardHTML(it, opts = {}){
     +   `<span class="sp"></span>`
     +   (it.reply_to ? `<a href="https://x.com/i/status/${esc(it.reply_to)}" target="_blank" rel="noopener">返信先</a>` : '')
     +   `<a href="${esc(it.url)}" target="_blank" rel="noopener">元の投稿</a>`
+    +   (opts.noTrash ? ''
+        : it.tr
+          ? `<button class="trashbtn restore" data-restore="${esc(it.id)}" title="ゴミ箱から戻す">↩ 復元</button>`
+          : `<button class="trashbtn" data-trash="${esc(it.id)}" title="ゴミ箱へ移動（データは残ります）">🗑</button>`)
     + `</div>`
-    + (opts.noChips ? '' : `<div class="fchips">${chips}</div>`)
+    + (opts.noChips || it.tr ? '' : `<div class="fchips">${chips}</div>`)
     + `</article>`;
 }
 
@@ -1061,7 +1099,12 @@ function computeCur(){
   const v = state.view;
   const arr = [];
   for (const it of state.items.values()) if (itemMatches(it, v)) arr.push(it);
-  arr.sort(SORTS[v.sort] || SORTS.new);
+  if (v.sort === 'rand'){
+    const seed = v.seed || 1;
+    arr.sort((a, b) => randKey(a.id, seed) - randKey(b.id, seed) || (a.id < b.id ? -1 : 1));
+  } else {
+    arr.sort(SORTS[v.sort] || SORTS.new);
+  }
   state.cur = arr;
 }
 
@@ -1072,10 +1115,15 @@ function renderList(){
   state.rendered = 0;
   appendChunk();
   $('#empty').hidden = state.items.size > 0;
-  const total = state.items.size;
-  const shown = state.cur.length;
-  $('#count').textContent = shown === total ? `${total} 件` : `${shown} / ${total} 件`;
+  updateCount();
   persistViewState();
+}
+
+function updateCount(){
+  const total = folderCounts().__live;   /* ゴミ箱を除いた件数 */
+  const shown = state.cur.length;
+  $('#count').textContent = (shown === total && state.view.folder !== '__trash')
+    ? `${total} 件` : `${shown} / ${total} 件`;
 }
 
 function appendChunk(){
@@ -1088,10 +1136,13 @@ function appendChunk(){
   state.rendered = end;
 }
 
+/* ゴミ箱の中身は各フォルダの件数に数えない */
 function folderCounts(){
-  const direct = { '': 0 };
+  const direct = { '': 0, __trash: 0, __live: 0 };
   for (const f of state.folders) direct[f] = 0;
   for (const it of state.items.values()){
+    if (it.tr){ direct.__trash++; continue; }
+    direct.__live++;
     if (!it.c) direct['']++;
     else if (direct[it.c] !== undefined) direct[it.c]++;
   }
@@ -1103,7 +1154,7 @@ function renderTabs(){
   const t = state.view.folder;
   const tab = (key, label, n) =>
     `<button class="tab${t === key ? ' on' : ''}" data-tab="${esc(key)}">${esc(label)}<span class="n">${n}</span></button>`;
-  let html = tab('__all', 'すべて', state.items.size) + tab('__none', '未分類', direct['']);
+  let html = tab('__all', 'すべて', direct.__live) + tab('__none', '未分類', direct['']);
   for (const f of state.folders){
     const slash = f.indexOf('/');
     if (slash === -1){
@@ -1116,6 +1167,8 @@ function renderTabs(){
       html += tab(f, label, direct[f]);
     }
   }
+  /* ゴミ箱タブ: 中身があるとき、または表示中のときだけ出す */
+  if (direct.__trash > 0 || t === '__trash') html += tab('__trash', '🗑 ゴミ箱', direct.__trash);
   $('#tabs').innerHTML = html;
 }
 
@@ -1128,6 +1181,7 @@ function renderControls(){
   uc.hidden = !v.user;
   if (v.user) uc.textContent = `@${v.user} ✕`;
   $('#sort').value = v.sort;
+  $('#btn-shuffle').hidden = v.sort !== 'rand';
 }
 
 function renderAll(){
@@ -1290,7 +1344,7 @@ async function wipeAll(){
   state.items.clear();
   state.folders = DEFAULT_FOLDERS.slice();
   state.history = [];
-  state.view = { q: '', media: false, quote: false, long: false, user: null, sort: 'new', folder: '__all' };
+  state.view = { q: '', media: false, quote: false, long: false, user: null, sort: 'new', seed: 0, folder: '__all' };
   $('#search').value = '';
   try { await store.clearAll(); await saveMeta(); } catch (e){}
   toast('書庫を全削除しました');
@@ -1309,6 +1363,26 @@ async function assignFolder(id, folder){
     b.classList.toggle('on', b.dataset.assign === it.c);
   });
   renderDataDialog();
+}
+
+/* ================= trash（非表示にするだけ。JSON からは消さない） ================= */
+async function setTrashed(id, on){
+  const it = state.items.get(id);
+  if (!it) return;
+  it.tr = on ? Date.now() : 0;
+  await saveItems([it]);
+  /* 現在のビューから外れるので、カードを畳んでから再集計 */
+  const card = document.querySelector(`.card[data-cid="${CSS.escape(id)}"]`);
+  if (card) card.remove();
+  const idx = state.cur.indexOf(it);
+  if (idx > -1){
+    state.cur.splice(idx, 1);
+    if (state.rendered > idx) state.rendered--;
+  }
+  renderTabs();
+  updateCount();
+  appendChunk();
+  toast(on ? '🗑 ゴミ箱へ移動しました（データは残ります）' : '↩ 復元しました');
 }
 
 /* ================= video playback ================= */
@@ -1338,7 +1412,7 @@ function playVideo(cell){
 const triage = { open: false, queue: [], idx: 0, stack: [] };
 
 function openTriage(){
-  triage.queue = [...state.items.values()].filter(it => !it.c).sort(SORTS.new);
+  triage.queue = [...state.items.values()].filter(it => !it.c && !it.tr).sort(SORTS.new);
   if (!triage.queue.length){ toast('未分類のアイテムはありません'); return; }
   triage.idx = 0;
   triage.stack = [];
@@ -1373,7 +1447,7 @@ function renderTriage(){
   if (done){
     body.innerHTML = `<div class="t-done">🎉 未分類アイテムの整理が終わりました。<br>「終了」または <kbd>Esc</kbd> で戻ります。</div>`;
   } else {
-    body.innerHTML = cardHTML(triage.queue[triage.idx], { noChips: true });
+    body.innerHTML = cardHTML(triage.queue[triage.idx], { noChips: true, noTrash: true });
     body.scrollTop = 0;
   }
 }
@@ -1412,7 +1486,18 @@ function bindEvents(){
     clearTimeout(deb);
     deb = setTimeout(() => { state.view.q = e.target.value.trim(); renderList(); }, 120);
   });
-  $('#sort').addEventListener('change', e => { state.view.sort = e.target.value; renderList(); });
+  $('#sort').addEventListener('change', e => {
+    state.view.sort = e.target.value;
+    if (state.view.sort === 'rand' && !state.view.seed) state.view.seed = newSeed();
+    renderControls();
+    renderList();
+    window.scrollTo(0, 0);
+  });
+  $('#btn-shuffle').addEventListener('click', () => {
+    state.view.seed = newSeed();
+    renderList();
+    window.scrollTo(0, 0);
+  });
   $('#f-media').addEventListener('click', () => { state.view.media = !state.view.media; renderControls(); renderList(); });
   $('#f-quote').addEventListener('click', () => { state.view.quote = !state.view.quote; renderControls(); renderList(); });
   $('#f-long').addEventListener('click', () => { state.view.long = !state.view.long; renderControls(); renderList(); });
@@ -1434,6 +1519,10 @@ function bindEvents(){
     if (ub){ state.view.user = ub.dataset.user; renderControls(); renderList(); return; }
     const chip = e.target.closest('[data-assign]');
     if (chip){ assignFolder(chip.dataset.id, chip.dataset.assign); return; }
+    const tb = e.target.closest('[data-trash]');
+    if (tb){ setTrashed(tb.dataset.trash, true); return; }
+    const rb = e.target.closest('[data-restore]');
+    if (rb){ setTrashed(rb.dataset.restore, false); return; }
   });
   $('#list').addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.target.matches('[data-play]')) playVideo(e.target);
