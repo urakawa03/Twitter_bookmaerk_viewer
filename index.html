@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>X ブックマーク書庫</title>
+<meta name="theme-color" content="#1d9bf0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{
   --bg:#f5f6f8; --card:#ffffff; --ink:#15202b; --sub:#5b7083; --line:#e1e8ed;
@@ -375,6 +379,7 @@ const state = {
   view: { q: '', media: false, quote: false, long: false, user: null, sort: 'new', folder: '__all' },
   cur: [],                          // filtered+sorted array
   rendered: 0,
+  lastBackupAt: null,
 };
 
 /* ================= storage (IndexedDB / fallback) ================= */
@@ -739,6 +744,8 @@ function buildBackup(){
   };
 }
 function downloadBackup(){
+  state.lastBackupAt = Date.now();
+  if (store.ok){ try { store.setMeta('lastBackupAt', state.lastBackupAt); } catch (e){} }
   const blob = new Blob([JSON.stringify(buildBackup())], { type: 'application/json' });
   const a = document.createElement('a');
   const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -971,8 +978,11 @@ function renderDataDialog(){
     ? state.history.slice().reverse().map(h =>
         `<li><span>${esc(h.name)}</span><span class="sp"></span><span>新規${h.added} / 重複${h.dup}</span><span style="color:var(--sub)">${esc(h.date)}</span></li>`).join('')
     : '<li style="color:var(--sub)">取込履歴はありません</li>';
+  const lastBk = state.lastBackupAt
+    ? `／最終バックアップ: ${new Date(state.lastBackupAt).toLocaleDateString('ja-JP')}`
+    : '／バックアップ未取得';
   $('#storage-note').textContent = store.ok
-    ? '保存先: このブラウザの IndexedDB（ローカルのみ・外部送信なし）'
+    ? `保存先: このブラウザの IndexedDB（ローカルのみ・外部送信なし）${lastBk}`
     : '⚠ 保存不可モード: データはメモリ上のみです';
 }
 
@@ -1339,13 +1349,15 @@ async function boot(){
   let vs = null;
   if (store.ok){
     try {
-      const [items, folders, history, viewstate] = await Promise.all([
-        store.getAllItems(), store.getMeta('folders'), store.getMeta('history'), store.getMeta('viewstate'),
+      const [items, folders, history, viewstate, lastBackupAt] = await Promise.all([
+        store.getAllItems(), store.getMeta('folders'), store.getMeta('history'),
+        store.getMeta('viewstate'), store.getMeta('lastBackupAt'),
       ]);
       for (const it of items) state.items.set(it.id, it);
       if (Array.isArray(folders) && folders.length) state.folders = folders;
       if (Array.isArray(history)) state.history = history;
       vs = viewstate;
+      state.lastBackupAt = typeof lastBackupAt === 'number' ? lastBackupAt : null;
     } catch (e){ console.warn('読込失敗', e); }
   }
   applyViewState(vs);
@@ -1353,6 +1365,17 @@ async function boot(){
   renderAll();
   booting = false;
   if (vs && vs.y) restoreScroll(vs.y);
+  /* バックアップの経過リマインド（データ保護。手作業のフォルダ割当は資産） */
+  if (store.ok && state.items.size > 0){
+    const THIRTY_DAYS = 30 * 24 * 3600 * 1000;
+    if (!state.lastBackupAt) toast('💾 バックアップがまだありません。「データ管理」から書き出しておくと安心です', 6000);
+    else if (Date.now() - state.lastBackupAt > THIRTY_DAYS) toast('💾 最終バックアップから30日以上経過しています', 6000);
+  }
+  /* Webアプリ（https / localhost）ではオフライン用 Service Worker を登録。file:// では従来通り */
+  if ('serviceWorker' in navigator
+      && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))){
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
 }
 
 /* テスト用フック（外部送信なし・ローカル検証専用） */
