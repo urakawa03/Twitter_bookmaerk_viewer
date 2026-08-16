@@ -56,11 +56,15 @@ select{padding:5px 6px; border:1px solid var(--line); border-radius:8px; font:in
 .tab.on{background:var(--ink); color:#fff; border-color:var(--ink)}
 .tab .n{font-size:11px; opacity:.75; margin-left:3px}
 
-#banner{
+#banner,#fsbanner{
   display:none; background:var(--warn-bg); color:var(--warn-ink);
   padding:8px 16px; text-align:center; font-size:13px;
 }
-#banner.show{display:block}
+#banner.show,#fsbanner.show{display:block}
+#fsbanner button{
+  margin-left:8px; padding:2px 12px; border:1px solid var(--warn-ink);
+  border-radius:12px; background:transparent; color:var(--warn-ink);
+}
 
 /* ---------- list / card ---------- */
 main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
@@ -223,6 +227,8 @@ kbd{
 </header>
 
 <div id="banner" role="alert"></div>
+<div id="fsbanner" role="alert">💾 データファイルとの連携を再開するには許可が必要です
+  <button id="fs-reconnect">再接続</button></div>
 
 <main>
   <div id="list"></div>
@@ -262,6 +268,18 @@ kbd{
     <div class="rowform">
       <input id="new-folder" placeholder="新しいフォルダ名">
       <button class="mini" id="add-folder">追加</button>
+    </div>
+
+    <h3>データファイル連携</h3>
+    <p style="font-size:13px;color:var(--sub);margin:4px 0">
+      書庫を手元の JSON ファイルへ自動保存します。アプリ（HTML）を差し替えても
+      データはこのファイルに残り、次回起動時に自動で読み込まれます。（Chrome / Edge 対応）
+    </p>
+    <p id="fsync-status" style="font-size:13px;margin:4px 0"></p>
+    <div class="rowform">
+      <button class="mini" id="fs-create">データファイルを新規作成</button>
+      <button class="mini" id="fs-open">既存ファイルを開く</button>
+      <button class="mini" id="fs-off">連携解除</button>
     </div>
 
     <h3>バックアップ / 復元</h3>
@@ -441,6 +459,7 @@ const store = {
 };
 
 async function saveMeta(){
+  scheduleFileSave();
   if (!store.ok) return;
   try {
     await store.setMeta('folders', state.folders.slice());
@@ -448,8 +467,139 @@ async function saveMeta(){
   } catch (e){ console.warn('meta保存失敗', e); }
 }
 async function saveItems(arr){
+  scheduleFileSave();
   if (!store.ok) return;
   try { await store.putItems(arr); } catch (e){ console.warn('items保存失敗', e); }
+}
+function trimHistory(){
+  if (state.history.length > 100) state.history = state.history.slice(-100);
+}
+
+/* ============ データファイル連携（File System Access API / Chrome・Edge） ============
+ * 書庫全体を手元の JSON ファイルへ自動保存する。アプリ（HTML）の差し替え・移動で
+ * ブラウザ内ストレージが見えなくなっても、このファイルから完全復元できる。 */
+const fsync = {
+  supported: typeof window.showSaveFilePicker === 'function' && typeof window.showOpenFilePicker === 'function',
+  handle: null,
+  status: 'off',   // off | on | need-permission | error
+  name: '',
+  timer: null,
+};
+function scheduleFileSave(){
+  if (fsync.status !== 'on' || !fsync.handle) return;
+  clearTimeout(fsync.timer);
+  fsync.timer = setTimeout(fsyncWrite, 800);
+}
+async function fsyncWrite(){
+  if (!fsync.handle) return;
+  try {
+    const w = await fsync.handle.createWritable();
+    await w.write(JSON.stringify(buildBackup()));
+    await w.close();
+    fsync.status = 'on';
+  } catch (e){
+    fsync.status = 'need-permission';
+    $('#fsbanner').classList.add('show');
+  }
+}
+/* ファイルを読み、メモリの書庫とマージする。
+ * 新規は追加、既存は「割当あり優先」（両方割当あり時はこのブラウザ側を優先）。 */
+function mergeArchive(data){
+  const bFolders = Array.isArray(data.folders) ? data.folders.filter(f => typeof f === 'string' && f) : [];
+  if (state.items.size === 0 && bFolders.length) state.folders = bFolders.slice();
+  else for (const f of bFolders) if (!state.folders.includes(f)) state.folders.push(f);
+  const changed = [];
+  for (const raw of (data.items || [])){
+    if (!raw || !raw.id) continue;
+    const ex = state.items.get(String(raw.id));
+    if (!ex){
+      const it = normalizeBackupItem(raw);
+      if (it){
+        state.items.set(it.id, it); changed.push(it);
+        if (it.c && !state.folders.includes(it.c)) state.folders.push(it.c);
+      }
+    } else {
+      if (!ex.c && typeof raw.c === 'string' && raw.c){
+        ex.c = raw.c; changed.push(ex);
+        if (!state.folders.includes(ex.c)) state.folders.push(ex.c);
+      }
+      if (!ex.qd && raw.qd && typeof raw.qd === 'object'){ ex.qd = raw.qd; changed.push(ex); }
+    }
+  }
+  if (Array.isArray(data.history)){
+    const seen = new Set(state.history.map(h => h.name + '|' + h.date));
+    for (const h of data.history) if (h && h.name && !seen.has(h.name + '|' + h.date)) state.history.push(h);
+  }
+  trimHistory();
+  normalizeFolderOrder();
+  saveItems(changed);
+  saveMeta();
+  return changed.length;
+}
+async function fsyncAdoptFile(){
+  let data = null;
+  try {
+    const f = await fsync.handle.getFile();
+    const text = await f.text();
+    if (text.trim()) data = JSON.parse(text);
+  } catch (e){ /* 空ファイル・壊れたJSONは無視して上書きで再生成 */ }
+  if (data && Array.isArray(data.items)) mergeArchive(data);
+  fsync.status = 'on';
+  scheduleFileSave();
+}
+async function fsyncInit(){
+  if (!fsync.supported || !store.ok) return;
+  try {
+    const h = await store.getMeta('fileHandle');
+    if (!h) return;
+    fsync.handle = h;
+    fsync.name = h.name || 'データファイル';
+    const perm = h.queryPermission ? await h.queryPermission({ mode: 'readwrite' }) : 'granted';
+    if (perm === 'granted') await fsyncAdoptFile();
+    else { fsync.status = 'need-permission'; $('#fsbanner').classList.add('show'); }
+  } catch (e){ fsync.status = 'error'; }
+}
+async function fsyncReconnect(){
+  if (!fsync.handle) return;
+  try {
+    const perm = await fsync.handle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted'){ toast('許可されなかったため連携を再開できません'); return; }
+    $('#fsbanner').classList.remove('show');
+    await fsyncAdoptFile();
+    renderAll();
+    toast(`データファイル「${fsync.name}」と再接続しました`);
+  } catch (e){ toast('再接続に失敗しました'); }
+}
+const JSON_PICKER_TYPES = [{ description: 'JSON', accept: { 'application/json': ['.json'] } }];
+async function fsyncCreate(){
+  try {
+    const h = await window.showSaveFilePicker({ suggestedName: 'x-bookmarks-data.json', types: JSON_PICKER_TYPES });
+    fsync.handle = h; fsync.name = h.name; fsync.status = 'on';
+    if (store.ok){ try { await store.setMeta('fileHandle', h); } catch (e){} }
+    await fsyncWrite();
+    renderDataDialog();
+    toast(`データファイル「${h.name}」と連携しました。以後は自動保存されます`);
+  } catch (e){ /* キャンセル */ }
+}
+async function fsyncOpen(){
+  try {
+    const [h] = await window.showOpenFilePicker({ types: JSON_PICKER_TYPES, multiple: false });
+    const perm = await h.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted'){ toast('書き込み許可が必要です'); return; }
+    fsync.handle = h; fsync.name = h.name;
+    if (store.ok){ try { await store.setMeta('fileHandle', h); } catch (e){} }
+    await fsyncAdoptFile();
+    renderAll();
+    toast(`データファイル「${h.name}」を読み込み、連携を開始しました`);
+  } catch (e){ /* キャンセル */ }
+}
+async function fsyncDisconnect(){
+  fsync.handle = null; fsync.status = 'off'; fsync.name = '';
+  clearTimeout(fsync.timer);
+  if (store.ok){ try { await store.setMeta('fileHandle', null); } catch (e){} }
+  $('#fsbanner').classList.remove('show');
+  renderDataDialog();
+  toast('データファイル連携を解除しました（ファイル自体は残ります）');
 }
 
 /* 閲覧状態（検索・絞り込み・タブ・ソート・スクロール位置）の記憶 */
@@ -706,6 +856,7 @@ function normalizeBackupItem(raw){
 
 async function finishImport(res, fname, suffix = ''){
   state.history.push({ name: fname, added: res.added, dup: res.dup, date: nowStr() });
+  trimHistory();
   await saveItems(res.changed);
   await saveMeta();
   return `新規 ${res.added} 件 / 重複 ${res.dup} 件${suffix}`;
@@ -984,6 +1135,20 @@ function renderDataDialog(){
   $('#storage-note').textContent = store.ok
     ? `保存先: このブラウザの IndexedDB（ローカルのみ・外部送信なし）${lastBk}`
     : '⚠ 保存不可モード: データはメモリ上のみです';
+  const fs = $('#fsync-status');
+  if (!fsync.supported){
+    fs.textContent = '状態: このブラウザは未対応です（Chrome / Edge で利用できます）';
+    $('#fs-create').disabled = $('#fs-open').disabled = $('#fs-off').disabled = true;
+  } else if (fsync.status === 'on'){
+    fs.textContent = `状態: ✅ 連携中「${fsync.name}」（変更のたびに自動保存）`;
+  } else if (fsync.status === 'need-permission'){
+    fs.textContent = `状態: ⚠ 要再接続「${fsync.name}」（画面上部の「再接続」を押してください）`;
+  } else if (fsync.status === 'error'){
+    fs.textContent = '状態: ⚠ 接続エラー。ファイルを開き直してください';
+  } else {
+    fs.textContent = '状態: 未設定';
+  }
+  if (fsync.supported) $('#fs-off').disabled = fsync.status === 'off';
 }
 
 /* フォルダの親子グループ化: 「親/子」は親の直後にまとめて並べる */
@@ -1088,7 +1253,13 @@ async function deleteFolder(f){
   renderAll();
 }
 async function wipeAll(){
-  if (!confirm('書庫のアイテム・フォルダ定義・取込履歴をすべて削除します。よろしいですか？')) return;
+  const fsNote = fsync.status !== 'off'
+    ? '\nデータファイルとの連携は解除されます（ファイル自体は削除されず残ります）。' : '';
+  if (!confirm(`書庫のアイテム・フォルダ定義・取込履歴をすべて削除します。よろしいですか？${fsNote}`)) return;
+  /* 連携ファイルは触らない（最後の砦として残す）。連携だけ解除する */
+  fsync.handle = null; fsync.status = 'off'; fsync.name = '';
+  clearTimeout(fsync.timer);
+  $('#fsbanner').classList.remove('show');
   state.items.clear();
   state.folders = DEFAULT_FOLDERS.slice();
   state.history = [];
@@ -1296,6 +1467,10 @@ function bindEvents(){
   });
   $('#btn-backup').addEventListener('click', downloadBackup);
   $('#btn-wipe').addEventListener('click', wipeAll);
+  $('#fs-create').addEventListener('click', fsyncCreate);
+  $('#fs-open').addEventListener('click', fsyncOpen);
+  $('#fs-off').addEventListener('click', fsyncDisconnect);
+  $('#fs-reconnect').addEventListener('click', fsyncReconnect);
 
   /* 整理モード */
   $('#btn-triage').addEventListener('click', openTriage);
@@ -1360,6 +1535,7 @@ async function boot(){
       state.lastBackupAt = typeof lastBackupAt === 'number' ? lastBackupAt : null;
     } catch (e){ console.warn('読込失敗', e); }
   }
+  await fsyncInit();   /* データファイル連携（あればファイルを読んでマージ） */
   applyViewState(vs);
   bindEvents();
   renderAll();
@@ -1384,6 +1560,7 @@ window.__xbm = {
   importCSV, importJSON,
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
   storageOk: () => store.ok,
+  fsync, fsyncWrite, fsyncAdoptFile, mergeArchive, trimHistory,
 };
 
 boot();
