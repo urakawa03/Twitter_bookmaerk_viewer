@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X ブックマーク書庫</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --ink:#15202b; --sub:#5b7083; --line:#e1e8ed;
+  --accent:#1d9bf0; --accent-ink:#ffffff; --chip:#eef3f6; --chip-on:#1d9bf0;
+  --warn-bg:#fff3cd; --warn-ink:#664d03; --danger:#dc3545;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif;
+  font-size:15px; line-height:1.6;
+}
+button{font:inherit; cursor:pointer}
+a{color:var(--accent); text-decoration:none; word-break:break-all}
+a:hover{text-decoration:underline}
+
+/* ---------- header ---------- */
+header{
+  position:sticky; top:0; z-index:20; background:var(--card);
+  border-bottom:1px solid var(--line); padding:8px 12px 0;
+}
+.hrow{display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:960px; margin:0 auto}
+.hrow h1{font-size:16px; margin:0 8px 0 0; white-space:nowrap}
+.hrow .count{color:var(--sub); font-size:13px; white-space:nowrap}
+#search{
+  flex:1; min-width:140px; padding:6px 10px; border:1px solid var(--line);
+  border-radius:16px; font:inherit; background:var(--bg);
+}
+select{padding:5px 6px; border:1px solid var(--line); border-radius:8px; font:inherit; background:var(--card)}
+.tbtn{
+  padding:5px 10px; border:1px solid var(--line); border-radius:16px;
+  background:var(--card); color:var(--ink); white-space:nowrap;
+}
+.tbtn.on{background:var(--chip-on); border-color:var(--chip-on); color:#fff}
+.tbtn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+#userchip{background:var(--ink); color:#fff; border-color:var(--ink)}
+.tabs{
+  display:flex; gap:4px; overflow-x:auto; padding:8px 0 8px; max-width:960px; margin:0 auto;
+  scrollbar-width:thin;
+}
+.tab{
+  padding:4px 12px; border:1px solid var(--line); border-radius:16px;
+  background:var(--card); white-space:nowrap; color:var(--sub);
+}
+.tab.on{background:var(--ink); color:#fff; border-color:var(--ink)}
+.tab .n{font-size:11px; opacity:.75; margin-left:3px}
+
+#banner{
+  display:none; background:var(--warn-bg); color:var(--warn-ink);
+  padding:8px 16px; text-align:center; font-size:13px;
+}
+#banner.show{display:block}
+
+/* ---------- list / card ---------- */
+main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
+.empty{color:var(--sub); text-align:center; padding:48px 16px}
+.card{
+  background:var(--card); border:1px solid var(--line); border-radius:12px;
+  padding:12px 14px; margin-bottom:10px;
+}
+.chead{display:flex; align-items:center; gap:8px; margin-bottom:6px}
+.avatar{width:40px; height:40px; border-radius:50%; flex:none; background:var(--chip)}
+.who{min-width:0; flex:1}
+.who .nm{font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.who .hd{font-size:13px}
+.who .hd button{border:0; background:none; color:var(--sub); padding:0}
+.who .hd button:hover{text-decoration:underline; color:var(--accent)}
+.dt{color:var(--sub); font-size:12px; white-space:nowrap; text-align:right}
+.dt .tz{opacity:.7}
+.body{white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word}
+.hashtag{color:var(--accent); font-weight:600}
+.longmark{font-size:11px; color:var(--sub); border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-left:6px}
+
+.media-grid{display:grid; gap:4px; margin-top:8px; border-radius:10px; overflow:hidden}
+.media-grid.n1{grid-template-columns:1fr}
+.media-grid.n2,.media-grid.n3,.media-grid.n4{grid-template-columns:1fr 1fr}
+.m-cell{position:relative; display:block; background:#0f1419; min-height:60px; max-height:420px; overflow:hidden; border-radius:6px}
+.m-cell img{width:100%; height:100%; max-height:420px; object-fit:cover; display:block}
+.m-video{cursor:pointer}
+.playbtn{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  color:#fff; font-weight:700; font-size:15px; text-shadow:0 1px 4px rgba(0,0,0,.8);
+  background:rgba(0,0,0,.18);
+}
+.m-cell video{width:100%; max-height:420px; display:block; background:#000}
+.m-fail{color:#fff; font-size:13px; padding:16px; text-align:center}
+.m-fail a{color:#8ecdf8}
+
+.quote{
+  border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-top:8px;
+  font-size:14px; background:var(--bg);
+}
+.quote .chead{margin-bottom:2px}
+.quote .avatar{width:24px; height:24px}
+.quote .who .nm{font-size:13px}
+.quote .who .hd{font-size:12px}
+.quote .body{font-size:14px}
+.quote .ph{color:var(--sub)}
+.quote .media-grid{max-height:240px}
+.quote .m-cell,.quote .m-cell img,.quote .m-cell video{max-height:240px}
+
+.cfoot{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:8px;
+  color:var(--sub); font-size:13px;
+}
+.cfoot .sp{flex:1}
+.fchips{display:flex; gap:4px; flex-wrap:wrap; margin-top:8px; padding-top:8px; border-top:1px solid var(--line)}
+.fchip{
+  font-size:12px; padding:2px 10px; border-radius:12px; border:1px solid var(--line);
+  background:var(--chip); color:var(--sub);
+}
+.fchip.on{background:var(--chip-on); border-color:var(--chip-on); color:#fff}
+
+#sentinel{height:1px}
+
+/* ---------- overlays ---------- */
+#dropzone{
+  display:none; position:fixed; inset:0; z-index:100; background:rgba(29,155,240,.15);
+  border:4px dashed var(--accent); align-items:center; justify-content:center;
+  font-size:20px; font-weight:700; color:var(--accent); pointer-events:none;
+}
+#dropzone.show{display:flex}
+
+dialog{
+  border:1px solid var(--line); border-radius:12px; padding:0; max-width:560px; width:calc(100% - 32px);
+  max-height:85vh;
+}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.dlg-in{padding:16px 20px 20px; overflow-y:auto; max-height:85vh}
+.dlg-in h2{font-size:16px; margin:0 0 12px}
+.dlg-in h3{font-size:14px; margin:18px 0 6px}
+.dlg-in ul{margin:4px 0; padding-left:0; list-style:none}
+.dlg-in li{padding:4px 0; border-bottom:1px solid var(--line); font-size:13px; display:flex; gap:8px; align-items:center}
+.dlg-in li .sp{flex:1}
+.mini{padding:2px 8px; font-size:12px; border:1px solid var(--line); border-radius:6px; background:var(--card)}
+.mini.danger{color:var(--danger); border-color:var(--danger)}
+.rowform{display:flex; gap:6px; margin-top:6px}
+.rowform input{flex:1; padding:5px 8px; border:1px solid var(--line); border-radius:6px; font:inherit}
+.dlg-close{float:right; border:0; background:none; font-size:18px; color:var(--sub)}
+
+/* ---------- triage ---------- */
+#triage{
+  display:none; position:fixed; inset:0; z-index:50; background:var(--bg);
+  flex-direction:column;
+}
+#triage.show{display:flex}
+.t-head{
+  display:flex; align-items:center; gap:12px; padding:10px 16px;
+  background:var(--card); border-bottom:1px solid var(--line);
+}
+.t-head .prog{font-weight:700}
+.t-head .stat{color:var(--sub); font-size:13px}
+.t-body{flex:1; overflow-y:auto; padding:16px 8px}
+.t-body .card{max-width:640px; margin:0 auto}
+.t-done{text-align:center; color:var(--sub); padding:64px 16px; font-size:16px}
+.t-foot{
+  background:var(--card); border-top:1px solid var(--line); padding:10px 16px 14px;
+}
+.t-folders{display:flex; gap:6px; flex-wrap:wrap; max-width:720px; margin:0 auto 8px}
+.t-fbtn{
+  padding:8px 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg);
+}
+.t-fbtn b{
+  display:inline-block; min-width:18px; text-align:center; background:var(--ink); color:#fff;
+  border-radius:4px; font-size:12px; margin-right:6px;
+}
+.t-acts{display:flex; gap:6px; max-width:720px; margin:0 auto}
+.t-acts button{padding:8px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card)}
+kbd{
+  border:1px solid var(--line); border-bottom-width:2px; border-radius:4px;
+  padding:0 4px; font-size:12px; background:var(--bg);
+}
+
+#toast{
+  position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:200;
+  background:var(--ink); color:#fff; padding:10px 18px; border-radius:10px;
+  font-size:13px; white-space:pre-line; max-width:90vw;
+  opacity:0; pointer-events:none; transition:opacity .25s;
+}
+#toast.show{opacity:1}
+
+@media (max-width:520px){
+  .hrow h1{display:none}
+  .dt{font-size:11px}
+}
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important; animation:none !important; scroll-behavior:auto !important}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <h1>X ブックマーク書庫</h1>
+    <span class="count" id="count"></span>
+    <input id="search" type="search" placeholder="本文・名前・@ハンドルを検索" aria-label="検索">
+    <select id="sort" aria-label="ソート">
+      <option value="new">新しい順</option>
+      <option value="old">古い順</option>
+      <option value="fav">いいね数順</option>
+    </select>
+    <button class="tbtn" id="f-media">メディア</button>
+    <button class="tbtn" id="f-quote">引用</button>
+    <button class="tbtn" id="f-long">長文</button>
+    <button class="tbtn" id="userchip" hidden></button>
+    <button class="tbtn" id="btn-triage">整理モード</button>
+    <button class="tbtn primary" id="btn-import">取込</button>
+    <button class="tbtn" id="btn-data">データ管理</button>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="フォルダ"></nav>
+</header>
+
+<div id="banner" role="alert"></div>
+
+<main>
+  <div id="list"></div>
+  <div id="sentinel"></div>
+  <div class="empty" id="empty" hidden>
+    ブックマークがありません。<br>
+    twitter-web-exporter の CSV / JSON をここにドラッグ&ドロップするか、「取込」から選択してください。
+  </div>
+</main>
+
+<div id="dropzone">CSV / JSON をドロップして取込</div>
+
+<div id="triage" role="dialog" aria-label="整理モード">
+  <div class="t-head">
+    <span class="prog" id="t-prog"></span>
+    <span class="stat" id="t-stat"></span>
+    <span style="flex:1"></span>
+    <button class="tbtn" id="t-close">終了 <kbd>Esc</kbd></button>
+  </div>
+  <div class="t-body" id="t-body"></div>
+  <div class="t-foot">
+    <div class="t-folders" id="t-folders"></div>
+    <div class="t-acts">
+      <button id="t-skip">スキップ <kbd>Enter</kbd></button>
+      <button id="t-undo">取り消し <kbd>←</kbd></button>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlg-data">
+  <div class="dlg-in">
+    <button class="dlg-close" id="dlg-x" aria-label="閉じる">✕</button>
+    <h2>データ管理</h2>
+
+    <h3>フォルダ</h3>
+    <ul id="folder-list"></ul>
+    <div class="rowform">
+      <input id="new-folder" placeholder="新しいフォルダ名">
+      <button class="mini" id="add-folder">追加</button>
+    </div>
+
+    <h3>バックアップ / 復元</h3>
+    <p style="font-size:13px;color:var(--sub);margin:4px 0">
+      書庫全体（アイテム・フォルダ定義・割当・取込履歴）を JSON で保存します。
+      復元は書き出した JSON をドロップまたは「取込」から読み込むだけです。
+    </p>
+    <button class="mini" id="btn-backup">バックアップをダウンロード</button>
+
+    <h3>取込履歴</h3>
+    <ul id="history-list"></ul>
+
+    <h3>危険な操作</h3>
+    <button class="mini danger" id="btn-wipe">書庫を全削除</button>
+    <p style="font-size:12px;color:var(--sub)" id="storage-note"></p>
+  </div>
+</dialog>
+
+<input type="file" id="file-input" multiple accept=".csv,.json,text/csv,application/json" hidden>
+<div id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= utilities ================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function decodeEntities(s){
+  return String(s ?? '')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&');
+}
+
+function normalizeUrl(u){
+  return String(u ?? '').replace(/^https?:\/\/(?:www\.|mobile\.)?twitter\.com\//i, 'https://x.com/');
+}
+
+/* 罠②: リテラル \n / \t のアンエスケープ + 3連以上の改行圧縮 */
+function unescapeText(s){
+  return String(s ?? '')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+/* 罠①: `2026-08-16 10:30:17 +09:00` を明示パース。表示は元オフセットのまま */
+function parseCreatedAt(raw){
+  raw = String(raw ?? '').trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\s*([+-])(\d{2}):?(\d{2}))?/);
+  if (m){
+    const [, y, mo, d, h, mi, s, sign, oh, om] = m;
+    let offSec = 0, tz = 'UTC';
+    if (sign){
+      offSec = (Number(oh) * 3600 + Number(om) * 60) * (sign === '-' ? -1 : 1);
+      tz = `${sign}${oh}:${om}`;
+    }
+    const ts = Date.UTC(+y, +mo - 1, +d, +h, +mi, +s) / 1000 - offSec;
+    return { ts, disp: `${y}/${mo}/${d} ${h}:${mi}`, tz };
+  }
+  /* Twitter API 形式 "Wed Oct 10 20:19:24 +0000 2018" 等のフォールバック */
+  const t = Date.parse(raw);
+  if (!isNaN(t)){
+    const dt = new Date(t + 9 * 3600 * 1000); /* JST 表示に統一 */
+    const p = n => String(n).padStart(2, '0');
+    return { ts: t / 1000,
+      disp: `${dt.getUTCFullYear()}/${p(dt.getUTCMonth()+1)}/${p(dt.getUTCDate())} ${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}`,
+      tz: '+09:00' };
+  }
+  return { ts: 0, disp: raw, tz: '' };
+}
+
+/* 罠③: media 自身を指す t.co を本文から除去 */
+function stripMediaLinks(text, media){
+  let out = text;
+  for (const m of media){
+    if (m && m.url) out = out.split(m.url).join('');
+  }
+  return out.replace(/[ \t]+$/gm, '').trim();
+}
+
+function toInt(v){
+  const n = parseInt(v, 10);
+  return isNaN(n) ? 0 : n;
+}
+
+function fmtNum(n){
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+  return String(n);
+}
+
+let toastTimer = null;
+function toast(msg, ms = 4200){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function nowStr(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/* ================= state ================= */
+const DEFAULT_FOLDERS = ['知識系', '面白系', 'あとで読む'];
+const state = {
+  items: new Map(),                 // id -> item
+  folders: DEFAULT_FOLDERS.slice(),
+  history: [],                      // {name, added, dup, date}
+  view: { q: '', media: false, quote: false, long: false, user: null, sort: 'new', folder: '__all' },
+  cur: [],                          // filtered+sorted array
+  rendered: 0,
+};
+
+/* ================= storage (IndexedDB / fallback) ================= */
+const store = {
+  ok: false, db: null,
+  async init(){
+    try {
+      if (!window.indexedDB) throw new Error('IndexedDB 非対応');
+      this.db = await new Promise((res, rej) => {
+        const req = indexedDB.open('xbm-viewer', 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('items')) db.createObjectStore('items', { keyPath: 'id' });
+          if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+        };
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error || new Error('open失敗'));
+        req.onblocked = () => rej(new Error('blocked'));
+      });
+      /* 書込テスト（プライベートモード等の検出） */
+      await this.setMeta('__probe', 1);
+      this.ok = true;
+    } catch (e){
+      this.ok = false;
+      const b = $('#banner');
+      b.textContent = '⚠ この環境ではローカル保存が使えません（保存不可）。閲覧は可能ですが、取込・フォルダ割当はページを閉じると失われます。';
+      b.classList.add('show');
+    }
+  },
+  tx(name, mode){ return this.db.transaction(name, mode).objectStore(name); },
+  req(r){ return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async putItems(arr){
+    if (!this.ok || !arr.length) return;
+    await new Promise((res, rej) => {
+      const tx = this.db.transaction('items', 'readwrite');
+      const os = tx.objectStore('items');
+      for (const it of arr) os.put(it);
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  async getAllItems(){
+    if (!this.ok) return [];
+    return await this.req(this.tx('items', 'readonly').getAll()) || [];
+  },
+  async clearAll(){
+    if (!this.ok) return;
+    await this.req(this.tx('items', 'readwrite').clear());
+    await this.req(this.tx('meta', 'readwrite').clear());
+  },
+  async getMeta(k){
+    if (!this.ok) return undefined;
+    return await this.req(this.tx('meta', 'readonly').get(k));
+  },
+  async setMeta(k, v){
+    const os = this.db.transaction('meta', 'readwrite').objectStore('meta');
+    return await this.req(os.put(v, k));
+  },
+};
+
+async function saveMeta(){
+  if (!store.ok) return;
+  try {
+    await store.setMeta('folders', state.folders.slice());
+    await store.setMeta('history', state.history.slice());
+  } catch (e){ console.warn('meta保存失敗', e); }
+}
+async function saveItems(arr){
+  if (!store.ok) return;
+  try { await store.putItems(arr); } catch (e){ console.warn('items保存失敗', e); }
+}
+
+/* ================= CSV parsing ================= */
+function parseCSV(text){
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // UTF-8 BOM
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++){
+    const ch = text[i];
+    if (inQ){
+      if (ch === '"'){
+        if (text[i + 1] === '"'){ field += '"'; i++; }
+        else inQ = false;
+      } else field += ch;
+    } else if (ch === '"'){
+      inQ = true;
+    } else if (ch === ','){
+      row.push(field); field = '';
+    } else if (ch === '\n'){
+      row.push(field); field = '';
+      rows.push(row); row = [];
+    } else if (ch !== '\r'){
+      field += ch;
+    }
+  }
+  if (field !== '' || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+
+/* ================= record normalization ================= */
+function normalizeRecord(rec){
+  const id = String(rec.id ?? '').trim();
+  if (!id || !/^\d+$/.test(id)) return null;
+  let media = rec.media;
+  if (typeof media === 'string'){
+    try { media = JSON.parse(media || '[]'); } catch { media = []; }
+  }
+  if (!Array.isArray(media)) media = [];
+  media = media.filter(Boolean).map(m => ({
+    type: m.type || 'photo',
+    url: m.url || '',
+    thumbnail: m.thumbnail || m.original || '',
+    original: m.original || m.thumbnail || '',
+  }));
+  const { ts, disp, tz } = parseCreatedAt(rec.created_at);
+  const text = stripMediaLinks(unescapeText(rec.full_text), media);
+  return {
+    id,
+    ts, dt: disp, tz,
+    text,
+    media,
+    screen_name: String(rec.screen_name ?? ''),
+    name: String(rec.name ?? ''),
+    avatar: String(rec.profile_image_url ?? ''),
+    user_id: String(rec.user_id ?? ''),
+    reply_to: String(rec.in_reply_to ?? '').trim(),
+    quoted_id: String(rec.quoted_status ?? '').trim(),
+    fav: toInt(rec.favorite_count),
+    rt: toInt(rec.retweet_count),
+    views: String(rec.views_count ?? '').trim() === '' ? null : toInt(rec.views_count),
+    url: normalizeUrl(rec.url || `https://x.com/i/status/${id}`),
+    c: '',        // フォルダ割当（未分類 = ''）
+    qd: null,     // 引用データ（metadata 付き JSON から抽出）
+  };
+}
+
+/* ================= GraphQL metadata → qd 抽出 ================= */
+function extractQd(metadata){
+  let r = metadata && metadata.quoted_status_result && metadata.quoted_status_result.result;
+  if (!r) return null;
+  return tweetResultToQd(r);
+}
+function tweetResultToQd(r){
+  if (r && r.__typename === 'TweetWithVisibilityResults') r = r.tweet; // 1段剥がす
+  if (!r || r.__typename === 'TweetTombstone' || r.__typename === 'TweetUnavailable'){
+    return { deleted: true };
+  }
+  const legacy = r.legacy || {};
+  const id = r.rest_id || legacy.id_str || '';
+  /* 長文対応: note_tweet 優先 */
+  let text = (r.note_tweet && r.note_tweet.note_tweet_results && r.note_tweet.note_tweet_results.result
+              && r.note_tweet.note_tweet_results.result.text) ?? legacy.full_text ?? '';
+  text = decodeEntities(text);
+  /* ユーザー: user.legacy 優先、新 API の user.core にも両対応 */
+  const u = (r.core && r.core.user_results && r.core.user_results.result) || {};
+  const ul = u.legacy || {}, uc = u.core || {};
+  const screen_name = ul.screen_name || uc.screen_name || '';
+  const name = ul.name || uc.name || '';
+  const avatar = ul.profile_image_url_https || (u.avatar && u.avatar.image_url) || '';
+  /* メディア: extended_entities 優先、video は mp4 最大ビットレート */
+  const rawMedia = (legacy.extended_entities && legacy.extended_entities.media)
+                || (legacy.entities && legacy.entities.media) || [];
+  const media = rawMedia.map(m => {
+    let original = m.media_url_https || '';
+    if ((m.type === 'video' || m.type === 'animated_gif') && m.video_info && Array.isArray(m.video_info.variants)){
+      const mp4s = m.video_info.variants
+        .filter(v => v.content_type === 'video/mp4')
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      if (mp4s[0]) original = mp4s[0].url;
+    }
+    return { type: m.type || 'photo', url: m.url || '', thumbnail: m.media_url_https || '', original };
+  });
+  return {
+    id,
+    text: stripMediaLinks(text.replace(/\n{3,}/g, '\n\n'), media),
+    screen_name, name, avatar, media,
+  };
+}
+
+/* ================= import ================= */
+function mergeRecords(recs){
+  let added = 0, dup = 0;
+  const changed = [];
+  for (const rec of recs){
+    if (!rec) continue;
+    const ex = state.items.get(rec.id);
+    if (ex){
+      dup++;
+      /* 既存アイテムには qd のみ補完（フォルダ割当 c は絶対に触らない） */
+      if (rec.qd && !ex.qd){ ex.qd = rec.qd; changed.push(ex); }
+    } else {
+      added++;
+      state.items.set(rec.id, rec);
+      changed.push(rec);
+    }
+  }
+  return { added, dup, changed };
+}
+
+async function importCSV(text, fname){
+  const rows = parseCSV(text);
+  if (!rows.length) throw new Error('空のCSV');
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  if (!header.includes('id')) throw new Error('id 列が見つかりません');
+  const idx = {};
+  header.forEach((h, i) => { idx[h] = i; });
+  const recs = [];
+  for (let i = 1; i < rows.length; i++){
+    const row = rows[i];
+    const rec = {};
+    for (const key of Object.keys(idx)) rec[key] = row[idx[key]];
+    recs.push(normalizeRecord(rec));
+  }
+  return finishImport(mergeRecords(recs), fname);
+}
+
+async function importJSON(text, fname){
+  const data = JSON.parse(text);
+  /* (c) 本アプリのバックアップ */
+  if (data && !Array.isArray(data) && Array.isArray(data.items)){
+    return restoreBackup(data, fname);
+  }
+  if (!Array.isArray(data)) throw new Error('未知のJSON形式');
+  /* (a) 通常 JSON / (b) metadata 付き JSON */
+  const recs = data.map(el => {
+    if (!el || typeof el !== 'object') return null;
+    const rec = normalizeRecord(el);
+    if (rec && el.metadata){
+      try { rec.qd = extractQd(el.metadata); } catch (e){ /* metadata 破損は無視 */ }
+      /* metadata に quoted_status_result が無くても quoted_id はそのまま */
+    }
+    return rec; /* metadata 自体は保存しない（qd のみ永続化） */
+  });
+  return finishImport(mergeRecords(recs), fname);
+}
+
+async function restoreBackup(data, fname){
+  /* フォルダ定義: 書庫が空なら完全復元、既存があればマージ */
+  const bFolders = Array.isArray(data.folders) ? data.folders.filter(f => typeof f === 'string' && f) : [];
+  if (state.items.size === 0 && bFolders.length){
+    state.folders = bFolders.slice();
+  } else {
+    for (const f of bFolders) if (!state.folders.includes(f)) state.folders.push(f);
+  }
+  let added = 0, dup = 0;
+  const changed = [];
+  for (const raw of data.items){
+    if (!raw || !raw.id) continue;
+    const ex = state.items.get(String(raw.id));
+    if (ex){
+      dup++;
+      /* 既存には割当（c）のみ適用 */
+      if (raw.c && raw.c !== ex.c){ ex.c = raw.c; changed.push(ex); }
+    } else {
+      const it = normalizeBackupItem(raw);
+      if (it){ state.items.set(it.id, it); changed.push(it); added++; }
+    }
+  }
+  /* 割当先フォルダが定義に無ければ追加しておく */
+  for (const it of changed) if (it.c && !state.folders.includes(it.c)) state.folders.push(it.c);
+  if (Array.isArray(data.history)){
+    const seen = new Set(state.history.map(h => h.name + '|' + h.date));
+    for (const h of data.history){
+      if (h && h.name && !seen.has(h.name + '|' + h.date)) state.history.push(h);
+    }
+  }
+  return finishImport({ added, dup, changed }, fname, '（バックアップ復元）');
+}
+
+function normalizeBackupItem(raw){
+  const id = String(raw.id ?? '').trim();
+  if (!id) return null;
+  return {
+    id,
+    ts: Number(raw.ts) || 0, dt: String(raw.dt ?? ''), tz: String(raw.tz ?? ''),
+    text: String(raw.text ?? ''),
+    media: Array.isArray(raw.media) ? raw.media : [],
+    screen_name: String(raw.screen_name ?? ''), name: String(raw.name ?? ''),
+    avatar: String(raw.avatar ?? ''), user_id: String(raw.user_id ?? ''),
+    reply_to: String(raw.reply_to ?? ''), quoted_id: String(raw.quoted_id ?? ''),
+    fav: toInt(raw.fav), rt: toInt(raw.rt),
+    views: raw.views == null ? null : toInt(raw.views),
+    url: normalizeUrl(raw.url || `https://x.com/i/status/${id}`),
+    c: typeof raw.c === 'string' ? raw.c : '',
+    qd: raw.qd && typeof raw.qd === 'object' ? raw.qd : null,
+  };
+}
+
+async function finishImport(res, fname, suffix = ''){
+  state.history.push({ name: fname, added: res.added, dup: res.dup, date: nowStr() });
+  await saveItems(res.changed);
+  await saveMeta();
+  return `新規 ${res.added} 件 / 重複 ${res.dup} 件${suffix}`;
+}
+
+async function handleFiles(files){
+  const reports = [];
+  for (const f of files){
+    try {
+      const text = await f.text();
+      const head = text.replace(/^﻿/, '').trimStart();
+      let rep;
+      if (/\.json$/i.test(f.name) || head.startsWith('{') || head.startsWith('[')){
+        rep = await importJSON(text, f.name);
+      } else {
+        rep = await importCSV(text, f.name);
+      }
+      reports.push(`${f.name}: ${rep}`);
+    } catch (e){
+      reports.push(`${f.name}: 取込失敗（${e.message}）`);
+    }
+  }
+  if (reports.length) toast(reports.join('\n'));
+  renderAll();
+}
+
+/* ================= backup ================= */
+function buildBackup(){
+  return {
+    app: 'x-bookmarks-viewer',
+    version: 1,
+    exported_at: nowStr(),
+    folders: state.folders.slice(),
+    history: state.history.slice(),
+    items: [...state.items.values()],
+  };
+}
+function downloadBackup(){
+  const blob = new Blob([JSON.stringify(buildBackup())], { type: 'application/json' });
+  const a = document.createElement('a');
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  a.href = URL.createObjectURL(blob);
+  a.download = `x-bookmarks-backup-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ================= filtering / sorting ================= */
+function itemMatches(it, v){
+  if (v.folder === '__none'){ if (it.c) return false; }
+  else if (v.folder !== '__all'){ if (it.c !== v.folder) return false; }
+  if (v.media && !(it.media && it.media.length)) return false;
+  if (v.quote && !(it.quoted_id || it.qd)) return false;
+  if (v.long && it.text.length < 300) return false;
+  if (v.user && it.screen_name !== v.user) return false;
+  if (v.q){
+    const q = v.q.toLowerCase();
+    if (!(it.text.toLowerCase().includes(q)
+       || it.name.toLowerCase().includes(q)
+       || it.screen_name.toLowerCase().includes(q))) return false;
+  }
+  return true;
+}
+const SORTS = {
+  new: (a, b) => b.ts - a.ts || (b.id < a.id ? -1 : 1),
+  old: (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1),
+  fav: (a, b) => b.fav - a.fav || b.ts - a.ts,
+};
+
+/* ================= rendering ================= */
+const CHUNK = 60;
+
+function renderText(text){
+  const re = /(https?:\/\/[^\s<>"]+)|([#＃][^\s#＃.,、。！？!?()（）「」]+)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(text))){
+    out += esc(text.slice(last, m.index));
+    if (m[1]){
+      const u = normalizeUrl(m[1]);
+      out += `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(m[1])}</a>`;
+    } else {
+      out += `<span class="hashtag">${esc(m[2])}</span>`;
+    }
+    last = m.index + m[0].length;
+  }
+  out += esc(text.slice(last));
+  return out;
+}
+
+function mediaHTML(media){
+  if (!media || !media.length) return '';
+  const cells = media.map(m => {
+    if (m.type === 'video' || m.type === 'animated_gif'){
+      const label = m.type === 'video' ? '▶ 動画を再生' : '▶ GIF を再生';
+      return `<div class="m-cell m-video" data-play data-type="${esc(m.type)}" data-original="${esc(m.original)}" role="button" tabindex="0" aria-label="${label}">`
+        + (m.thumbnail ? `<img data-kind="thumb" loading="lazy" src="${esc(m.thumbnail)}" alt="">` : '')
+        + `<span class="playbtn">${label}</span></div>`;
+    }
+    return `<a class="m-cell" data-kind-wrap="photo" href="${esc(m.original)}" target="_blank" rel="noopener">`
+      + `<img data-kind="photo" loading="lazy" src="${esc(m.thumbnail || m.original)}" alt=""></a>`;
+  }).join('');
+  return `<div class="media-grid n${Math.min(media.length, 4)}">${cells}</div>`;
+}
+
+function quoteHTML(it){
+  const qid = it.quoted_id || (it.qd && it.qd.id) || '';
+  const link = `https://x.com/i/status/${esc(qid)}`;
+  /* (a) qd を優先 */
+  if (it.qd){
+    if (it.qd.deleted){
+      return `<div class="quote"><div class="ph">🚫 引用元は削除済み・非公開です</div>`
+        + (qid ? `<a href="${link}" target="_blank" rel="noopener">元の投稿を開く</a>` : '') + `</div>`;
+    }
+    return `<div class="quote">${quoteInner(it.qd, qid)}</div>`;
+  }
+  /* (b) 書庫内の相互参照 */
+  if (qid && state.items.has(qid)){
+    const q = state.items.get(qid);
+    return `<div class="quote">${quoteInner(q, qid, q.dt)}</div>`;
+  }
+  /* (c) プレースホルダ */
+  if (qid){
+    return `<div class="quote"><div class="ph">💬 引用元は書庫外です（本文未取得）</div>`
+      + `<a href="${link}" target="_blank" rel="noopener">元の投稿を開く</a></div>`;
+  }
+  return '';
+}
+/* 入れ子は1段まで: quoteInner は再帰的に引用を描画しない */
+function quoteInner(q, qid, dt){
+  return `<div class="chead">`
+    + (q.avatar ? `<img class="avatar" data-kind="avatar" loading="lazy" src="${esc(q.avatar)}" alt="">` : '')
+    + `<div class="who"><span class="nm">${esc(q.name)}</span> `
+    + `<span class="hd" style="color:var(--sub)">@${esc(q.screen_name)}</span></div>`
+    + (dt ? `<div class="dt">${esc(dt)}</div>` : '')
+    + `</div>`
+    + `<div class="body">${renderText(q.text || '')}</div>`
+    + mediaHTML(q.media)
+    + (qid ? `<div style="margin-top:4px"><a href="https://x.com/i/status/${esc(qid)}" target="_blank" rel="noopener" style="font-size:12px">元の投稿</a></div>` : '');
+}
+
+function cardHTML(it, opts = {}){
+  const chips = state.folders.map(f =>
+    `<button class="fchip${it.c === f ? ' on' : ''}" data-assign="${esc(f)}" data-id="${esc(it.id)}" title="${it.c === f ? '割当を解除' : 'このフォルダに割当'}">${esc(f)}</button>`
+  ).join('');
+  return `<article class="card" data-cid="${esc(it.id)}">`
+    + `<div class="chead">`
+    +   (it.avatar ? `<img class="avatar" data-kind="avatar" loading="lazy" src="${esc(it.avatar)}" alt="">` : `<span class="avatar"></span>`)
+    +   `<div class="who"><div class="nm">${esc(it.name)}${it.text.length >= 300 ? '<span class="longmark">長文</span>' : ''}</div>`
+    +     `<div class="hd"><button data-user="${esc(it.screen_name)}" title="このユーザーで絞り込み">@${esc(it.screen_name)}</button></div></div>`
+    +   `<div class="dt">${esc(it.dt)}<br><span class="tz">${esc(it.tz)}</span></div>`
+    + `</div>`
+    + `<div class="body">${renderText(it.text)}</div>`
+    + mediaHTML(it.media)
+    + quoteHTML(it)
+    + `<div class="cfoot">`
+    +   `<span title="いいね">♥ ${fmtNum(it.fav)}</span>`
+    +   `<span title="リポスト">🔁 ${fmtNum(it.rt)}</span>`
+    +   (it.views != null ? `<span title="表示回数">👁 ${fmtNum(it.views)}</span>` : '')
+    +   `<span class="sp"></span>`
+    +   (it.reply_to ? `<a href="https://x.com/i/status/${esc(it.reply_to)}" target="_blank" rel="noopener">返信先</a>` : '')
+    +   `<a href="${esc(it.url)}" target="_blank" rel="noopener">元の投稿</a>`
+    + `</div>`
+    + (opts.noChips ? '' : `<div class="fchips">${chips}</div>`)
+    + `</article>`;
+}
+
+function computeCur(){
+  const v = state.view;
+  const arr = [];
+  for (const it of state.items.values()) if (itemMatches(it, v)) arr.push(it);
+  arr.sort(SORTS[v.sort] || SORTS.new);
+  state.cur = arr;
+}
+
+function renderList(){
+  computeCur();
+  const list = $('#list');
+  list.innerHTML = '';
+  state.rendered = 0;
+  appendChunk();
+  $('#empty').hidden = state.items.size > 0;
+  const total = state.items.size;
+  const shown = state.cur.length;
+  $('#count').textContent = shown === total ? `${total} 件` : `${shown} / ${total} 件`;
+}
+
+function appendChunk(){
+  const list = $('#list');
+  const end = Math.min(state.rendered + CHUNK, state.cur.length);
+  if (state.rendered >= end) return;
+  let html = '';
+  for (let i = state.rendered; i < end; i++) html += cardHTML(state.cur[i]);
+  list.insertAdjacentHTML('beforeend', html);
+  state.rendered = end;
+}
+
+function renderTabs(){
+  const counts = { '': 0 };
+  for (const f of state.folders) counts[f] = 0;
+  for (const it of state.items.values()){
+    if (it.c && counts[it.c] !== undefined) counts[it.c]++;
+    else if (!it.c) counts['']++;
+  }
+  const t = state.view.folder;
+  const tab = (key, label, n) =>
+    `<button class="tab${t === key ? ' on' : ''}" data-tab="${esc(key)}">${esc(label)}<span class="n">${n}</span></button>`;
+  let html = tab('__all', 'すべて', state.items.size) + tab('__none', '未分類', counts['']);
+  for (const f of state.folders) html += tab(f, f, counts[f]);
+  $('#tabs').innerHTML = html;
+}
+
+function renderControls(){
+  const v = state.view;
+  $('#f-media').classList.toggle('on', v.media);
+  $('#f-quote').classList.toggle('on', v.quote);
+  $('#f-long').classList.toggle('on', v.long);
+  const uc = $('#userchip');
+  uc.hidden = !v.user;
+  if (v.user) uc.textContent = `@${v.user} ✕`;
+  $('#sort').value = v.sort;
+}
+
+function renderAll(){
+  renderTabs();
+  renderControls();
+  renderList();
+  renderDataDialog();
+}
+
+/* ================= data dialog ================= */
+function renderDataDialog(){
+  const fl = $('#folder-list');
+  fl.innerHTML = state.folders.map((f, i) => {
+    let n = 0;
+    for (const it of state.items.values()) if (it.c === f) n++;
+    return `<li><span>${esc(f)}</span><span class="n" style="color:var(--sub);font-size:12px">${n}件</span><span class="sp"></span>`
+      + `<button class="mini" data-rename="${i}">改名</button>`
+      + `<button class="mini danger" data-delfolder="${i}">削除</button></li>`;
+  }).join('');
+  const hl = $('#history-list');
+  hl.innerHTML = state.history.length
+    ? state.history.slice().reverse().map(h =>
+        `<li><span>${esc(h.name)}</span><span class="sp"></span><span>新規${h.added} / 重複${h.dup}</span><span style="color:var(--sub)">${esc(h.date)}</span></li>`).join('')
+    : '<li style="color:var(--sub)">取込履歴はありません</li>';
+  $('#storage-note').textContent = store.ok
+    ? '保存先: このブラウザの IndexedDB（ローカルのみ・外部送信なし）'
+    : '⚠ 保存不可モード: データはメモリ上のみです';
+}
+
+async function addFolder(name){
+  name = name.trim();
+  if (!name) return;
+  if (state.folders.includes(name)){ toast('同名のフォルダがあります'); return; }
+  state.folders.push(name);
+  await saveMeta();
+  renderAll();
+}
+async function renameFolder(i){
+  const old = state.folders[i];
+  const name = prompt(`フォルダ「${old}」の新しい名前`, old);
+  if (!name || name.trim() === '' || name === old) return;
+  const nn = name.trim();
+  if (state.folders.includes(nn)){ toast('同名のフォルダがあります'); return; }
+  state.folders[i] = nn;
+  const changed = [];
+  for (const it of state.items.values()) if (it.c === old){ it.c = nn; changed.push(it); }
+  if (state.view.folder === old) state.view.folder = nn;
+  await saveItems(changed);
+  await saveMeta();
+  renderAll();
+}
+async function deleteFolder(i){
+  const f = state.folders[i];
+  if (!confirm(`フォルダ「${f}」を削除しますか？\n中のアイテムは未分類に戻ります。`)) return;
+  state.folders.splice(i, 1);
+  const changed = [];
+  for (const it of state.items.values()) if (it.c === f){ it.c = ''; changed.push(it); }
+  if (state.view.folder === f) state.view.folder = '__all';
+  await saveItems(changed);
+  await saveMeta();
+  renderAll();
+}
+async function wipeAll(){
+  if (!confirm('書庫のアイテム・フォルダ定義・取込履歴をすべて削除します。よろしいですか？')) return;
+  state.items.clear();
+  state.folders = DEFAULT_FOLDERS.slice();
+  state.history = [];
+  state.view = { q: '', media: false, quote: false, long: false, user: null, sort: 'new', folder: '__all' };
+  $('#search').value = '';
+  try { await store.clearAll(); await saveMeta(); } catch (e){}
+  toast('書庫を全削除しました');
+  renderAll();
+}
+
+/* ================= folder assign ================= */
+async function assignFolder(id, folder){
+  const it = state.items.get(id);
+  if (!it) return;
+  it.c = (it.c === folder) ? '' : folder; // 同じチップ再タップで解除
+  await saveItems([it]);
+  renderTabs();
+  /* 表示中のカードのチップだけ更新（リスト再構築を避ける） */
+  document.querySelectorAll(`.card[data-cid="${CSS.escape(id)}"] .fchip`).forEach(b => {
+    b.classList.toggle('on', b.dataset.assign === it.c);
+  });
+  renderDataDialog();
+}
+
+/* ================= video playback ================= */
+function playVideo(cell){
+  const type = cell.dataset.type;
+  const src = cell.dataset.original;
+  const video = document.createElement('video');
+  video.src = src;
+  video.controls = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  if (type === 'animated_gif'){ video.loop = true; video.muted = true; }
+  video.addEventListener('error', () => {
+    const fail = document.createElement('div');
+    fail.className = 'm-fail';
+    fail.innerHTML = `動画を読み込めませんでした（元ツイート削除済みの可能性）<br>`
+      + `<a href="${esc(src)}" target="_blank" rel="noopener">直リンクを開く</a>`;
+    cell.innerHTML = '';
+    cell.appendChild(fail);
+  });
+  cell.innerHTML = '';
+  cell.appendChild(video);
+  video.play().catch(() => {});
+}
+
+/* ================= triage mode ================= */
+const triage = { open: false, queue: [], idx: 0, stack: [] };
+
+function openTriage(){
+  triage.queue = [...state.items.values()].filter(it => !it.c).sort(SORTS.new);
+  if (!triage.queue.length){ toast('未分類のアイテムはありません'); return; }
+  triage.idx = 0;
+  triage.stack = [];
+  triage.open = true;
+  $('#triage').classList.add('show');
+  renderTriage();
+}
+function closeTriage(){
+  triage.open = false;
+  $('#triage').classList.remove('show');
+  renderAll();
+}
+function renderTriage(){
+  const total = triage.queue.length;
+  const done = triage.idx >= total;
+  $('#t-prog').textContent = done ? `完了（${total} / ${total}）` : `${triage.idx + 1} / ${total}`;
+  const assigned = triage.stack.filter(e => e.action === 'assign').length;
+  const skipped = triage.stack.filter(e => e.action === 'skip').length;
+  $('#t-stat').textContent = `割当 ${assigned} / スキップ ${skipped}`;
+  $('#t-folders').innerHTML = state.folders.map((f, i) =>
+    i < 9 ? `<button class="t-fbtn" data-tassign="${esc(f)}"><b>${i + 1}</b>${esc(f)}</button>`
+          : `<button class="t-fbtn" data-tassign="${esc(f)}">${esc(f)}</button>`
+  ).join('');
+  const body = $('#t-body');
+  if (done){
+    body.innerHTML = `<div class="t-done">🎉 未分類アイテムの整理が終わりました。<br>「終了」または <kbd>Esc</kbd> で戻ります。</div>`;
+  } else {
+    body.innerHTML = cardHTML(triage.queue[triage.idx], { noChips: true });
+    body.scrollTop = 0;
+  }
+}
+function triageAssign(folder){
+  if (triage.idx >= triage.queue.length) return;
+  const it = triage.queue[triage.idx];
+  triage.stack.push({ id: it.id, action: 'assign', prev: it.c });
+  it.c = folder;
+  triage.idx++;          /* 状態は同期更新（キー連打でも二重割当しない） */
+  saveItems([it]);       /* 永続化は非同期でよい */
+  renderTriage();
+}
+function triageSkip(){
+  if (triage.idx >= triage.queue.length) return;
+  const it = triage.queue[triage.idx];
+  triage.stack.push({ id: it.id, action: 'skip', prev: it.c });
+  triage.idx++;
+  renderTriage();
+}
+function triageUndo(){
+  const e = triage.stack.pop();
+  if (!e) return;
+  triage.idx = Math.max(0, triage.idx - 1);
+  if (e.action === 'assign'){
+    const it = state.items.get(e.id);
+    if (it){ it.c = e.prev; saveItems([it]); }
+  }
+  renderTriage();
+}
+
+/* ================= events ================= */
+function bindEvents(){
+  /* 検索（インクリメンタル） */
+  let deb = null;
+  $('#search').addEventListener('input', e => {
+    clearTimeout(deb);
+    deb = setTimeout(() => { state.view.q = e.target.value.trim(); renderList(); }, 120);
+  });
+  $('#sort').addEventListener('change', e => { state.view.sort = e.target.value; renderList(); });
+  $('#f-media').addEventListener('click', () => { state.view.media = !state.view.media; renderControls(); renderList(); });
+  $('#f-quote').addEventListener('click', () => { state.view.quote = !state.view.quote; renderControls(); renderList(); });
+  $('#f-long').addEventListener('click', () => { state.view.long = !state.view.long; renderControls(); renderList(); });
+  $('#userchip').addEventListener('click', () => { state.view.user = null; renderControls(); renderList(); });
+
+  $('#tabs').addEventListener('click', e => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    state.view.folder = b.dataset.tab;
+    renderTabs();
+    renderList();
+  });
+
+  /* リスト上の操作（委譲） */
+  $('#list').addEventListener('click', e => {
+    const play = e.target.closest('[data-play]');
+    if (play){ playVideo(play); return; }
+    const ub = e.target.closest('[data-user]');
+    if (ub){ state.view.user = ub.dataset.user; renderControls(); renderList(); return; }
+    const chip = e.target.closest('[data-assign]');
+    if (chip){ assignFolder(chip.dataset.id, chip.dataset.assign); return; }
+  });
+  $('#list').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.matches('[data-play]')) playVideo(e.target);
+  });
+  /* 罠⑤: 壊れた画像の非表示（error はバブルしないので capture で拾う） */
+  document.addEventListener('error', e => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    const kind = img.dataset.kind;
+    if (kind === 'photo'){
+      const wrap = img.closest('.m-cell');
+      if (wrap) wrap.style.display = 'none';   // 写真は枠ごと非表示
+    } else if (kind === 'thumb'){
+      img.style.display = 'none';              // 動画はサムネのみ消し、再生枠は残す
+    } else if (kind === 'avatar'){
+      img.style.visibility = 'hidden';
+    }
+  }, true);
+
+  /* 取込 */
+  $('#btn-import').addEventListener('click', () => $('#file-input').click());
+  $('#file-input').addEventListener('change', e => {
+    handleFiles([...e.target.files]);
+    e.target.value = '';
+  });
+
+  /* ドラッグ&ドロップ */
+  let dragDepth = 0;
+  window.addEventListener('dragenter', e => {
+    e.preventDefault();
+    dragDepth++;
+    $('#dropzone').classList.add('show');
+  });
+  window.addEventListener('dragleave', () => {
+    if (--dragDepth <= 0){ dragDepth = 0; $('#dropzone').classList.remove('show'); }
+  });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    dragDepth = 0;
+    $('#dropzone').classList.remove('show');
+    if (e.dataTransfer && e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]);
+  });
+
+  /* データ管理ダイアログ */
+  const dlg = $('#dlg-data');
+  $('#btn-data').addEventListener('click', () => { renderDataDialog(); dlg.showModal(); });
+  $('#dlg-x').addEventListener('click', () => dlg.close());
+  $('#add-folder').addEventListener('click', () => {
+    addFolder($('#new-folder').value);
+    $('#new-folder').value = '';
+  });
+  $('#new-folder').addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ addFolder(e.target.value); e.target.value = ''; }
+  });
+  $('#folder-list').addEventListener('click', e => {
+    const r = e.target.closest('[data-rename]');
+    if (r){ renameFolder(+r.dataset.rename); return; }
+    const d = e.target.closest('[data-delfolder]');
+    if (d){ deleteFolder(+d.dataset.delfolder); return; }
+  });
+  $('#btn-backup').addEventListener('click', downloadBackup);
+  $('#btn-wipe').addEventListener('click', wipeAll);
+
+  /* 整理モード */
+  $('#btn-triage').addEventListener('click', openTriage);
+  $('#t-close').addEventListener('click', closeTriage);
+  $('#t-skip').addEventListener('click', triageSkip);
+  $('#t-undo').addEventListener('click', triageUndo);
+  $('#t-folders').addEventListener('click', e => {
+    const b = e.target.closest('[data-tassign]');
+    if (b) triageAssign(b.dataset.tassign);
+  });
+  $('#t-body').addEventListener('click', e => {
+    const play = e.target.closest('[data-play]');
+    if (play) playVideo(play);
+  });
+
+  /* キーボード */
+  document.addEventListener('keydown', e => {
+    if (triage.open){
+      if (e.key === 'Escape'){ e.preventDefault(); closeTriage(); return; }
+      if (e.key === 'Enter'){ e.preventDefault(); triageSkip(); return; }
+      if (e.key === 'ArrowLeft'){ e.preventDefault(); triageUndo(); return; }
+      if (/^[1-9]$/.test(e.key)){
+        const f = state.folders[+e.key - 1];
+        if (f){ e.preventDefault(); triageAssign(f); }
+      }
+      return;
+    }
+    if (e.key === '/' && !e.target.matches('input,select,textarea')){
+      e.preventDefault();
+      $('#search').focus();
+    }
+  });
+
+  /* 段階描画: 番兵が見えたら次チャンク */
+  const io = new IntersectionObserver(entries => {
+    if (entries.some(en => en.isIntersecting)) appendChunk();
+  }, { rootMargin: '600px' });
+  io.observe($('#sentinel'));
+}
+
+/* ================= boot ================= */
+async function boot(){
+  await store.init();
+  if (store.ok){
+    try {
+      const [items, folders, history] = await Promise.all([
+        store.getAllItems(), store.getMeta('folders'), store.getMeta('history'),
+      ]);
+      for (const it of items) state.items.set(it.id, it);
+      if (Array.isArray(folders) && folders.length) state.folders = folders;
+      if (Array.isArray(history)) state.history = history;
+    } catch (e){ console.warn('読込失敗', e); }
+  }
+  bindEvents();
+  renderAll();
+}
+
+/* テスト用フック（外部送信なし・ローカル検証専用） */
+window.__xbm = {
+  state, buildBackup, handleFiles,
+  importCSV, importJSON,
+  parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
+  storageOk: () => store.ok,
+};
+
+boot();
+})();
+</script>
+</body>
+</html>
