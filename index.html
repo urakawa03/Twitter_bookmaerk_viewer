@@ -1003,17 +1003,47 @@ function renderText(text){
   return out;
 }
 
+/* twimg の画像URLを指定サイズ版に変換する。
+ * サムネイル（name=small・680px幅）をそのまま拡大表示すると粗くなるため、
+ * 表示幅と画面解像度に合った版をブラウザに選ばせる。 */
+function twimgSized(url, size){
+  const u = String(url || '');
+  if (!/pbs\.twimg\.com/.test(u)) return u;
+  if (/[?&]name=/.test(u)) return u.replace(/([?&]name=)[^&]*/, `$1${size}`);
+  /* 旧形式 .jpg / .jpg:large → ?format=jpg&name=SIZE */
+  const m = u.match(/^([^?#]*)\.(jpg|jpeg|png|webp)(?::\w+)?$/i);
+  if (m) return `${m[1]}?format=${m[2].toLowerCase()}&name=${size}`;
+  return u;
+}
+/* 幅の異なる候補を渡し、ブラウザに最適な1枚を選ばせる（高DPI画面でくっきり） */
+function imgSrcset(url){
+  if (!/pbs\.twimg\.com/.test(String(url || ''))) return '';
+  return ` srcset="${esc(twimgSized(url, 'small'))} 680w, ${esc(twimgSized(url, 'medium'))} 1200w, `
+       + `${esc(twimgSized(url, 'large'))} 2048w" sizes="(max-width: 680px) 100vw, 640px"`;
+}
+
+/* アバターは _normal（48px）だと高DPI画面でぼやけるので大きい版を使う。
+ * 存在しない場合は data-fb の元URLへ自動で戻す。 */
+function avatarHTML(url, cls){
+  const u = String(url || '');
+  if (!u) return `<span class="${cls}"></span>`;
+  const big = u.replace(/_(normal|mini|bigger)\.(jpg|jpeg|png|webp|gif)$/i, '_400x400.$2');
+  return `<img class="${cls}" data-kind="avatar" data-fb="${esc(u)}" loading="lazy" src="${esc(big)}" alt="">`;
+}
+
 function mediaHTML(media){
   if (!media || !media.length) return '';
   const cells = media.map(m => {
+    /* 表示用の元画像: 原寸（orig）を基準にサイズ違いを組み立てる */
+    const base = m.original && !/\.mp4(\?|$)/i.test(m.original) ? m.original : m.thumbnail;
     if (m.type === 'video' || m.type === 'animated_gif'){
       const label = m.type === 'video' ? '▶ 動画を再生' : '▶ GIF を再生';
       return `<div class="m-cell m-video" data-play data-type="${esc(m.type)}" data-original="${esc(m.original)}" role="button" tabindex="0" aria-label="${label}">`
-        + (m.thumbnail ? `<img data-kind="thumb" loading="lazy" src="${esc(m.thumbnail)}" alt="">` : '')
+        + (m.thumbnail ? `<img data-kind="thumb" data-fb="${esc(m.thumbnail)}" loading="lazy" src="${esc(twimgSized(m.thumbnail, 'medium'))}"${imgSrcset(m.thumbnail)} alt="">` : '')
         + `<span class="playbtn">${label}</span></div>`;
     }
-    return `<a class="m-cell" data-kind-wrap="photo" href="${esc(m.original)}" target="_blank" rel="noopener">`
-      + `<img data-kind="photo" loading="lazy" src="${esc(m.thumbnail || m.original)}" alt=""></a>`;
+    return `<a class="m-cell" data-kind-wrap="photo" href="${esc(m.original || base)}" target="_blank" rel="noopener">`
+      + `<img data-kind="photo" data-fb="${esc(m.thumbnail || base)}" loading="lazy" src="${esc(twimgSized(base, 'medium'))}"${imgSrcset(base)} alt=""></a>`;
   }).join('');
   return `<div class="media-grid n${Math.min(media.length, 4)}">${cells}</div>`;
 }
@@ -1044,7 +1074,7 @@ function quoteHTML(it){
 /* 入れ子は1段まで: quoteInner は再帰的に引用を描画しない */
 function quoteInner(q, qid, dt){
   return `<div class="chead">`
-    + (q.avatar ? `<img class="avatar" data-kind="avatar" loading="lazy" src="${esc(q.avatar)}" alt="">` : '')
+    + (q.avatar ? avatarHTML(q.avatar, 'avatar') : '')
     + `<div class="who"><span class="nm">${esc(q.name)}</span> `
     + `<span class="hd" style="color:var(--sub)">@${esc(q.screen_name)}</span></div>`
     + (dt ? `<div class="dt">${esc(dt)}</div>` : '')
@@ -1071,7 +1101,7 @@ function cardHTML(it, opts = {}){
   const chips = folderChipsHTML(it);
   return `<article class="card${it.tr ? ' trashed' : ''}" data-cid="${esc(it.id)}">`
     + `<div class="chead">`
-    +   (it.avatar ? `<img class="avatar" data-kind="avatar" loading="lazy" src="${esc(it.avatar)}" alt="">` : `<span class="avatar"></span>`)
+    +   avatarHTML(it.avatar, 'avatar')
     +   `<div class="who"><div class="nm">${esc(it.name)}${it.text.length >= 300 ? '<span class="longmark">長文</span>' : ''}</div>`
     +     `<div class="hd"><button data-user="${esc(it.screen_name)}" title="このユーザーで絞り込み">@${esc(it.screen_name)}</button></div></div>`
     +   `<div class="dt">${esc(it.dt)}<br><span class="tz">${esc(it.tz)}</span></div>`
@@ -1532,13 +1562,28 @@ function bindEvents(){
     const img = e.target;
     if (!(img instanceof HTMLImageElement)) return;
     const kind = img.dataset.kind;
+    /* サイズ変換版が無い場合は元URLで一度だけ再試行してから諦める */
+    const fb = img.dataset.fb;
+    if (fb && !img.dataset.fbTried && img.getAttribute('src') !== fb && kind !== 'avatar'){
+      img.dataset.fbTried = '1';
+      img.removeAttribute('srcset');            // srcset は src より優先されるため外す
+      img.src = fb;
+      return;
+    }
     if (kind === 'photo'){
       const wrap = img.closest('.m-cell');
       if (wrap) wrap.style.display = 'none';   // 写真は枠ごと非表示
     } else if (kind === 'thumb'){
       img.style.display = 'none';              // 動画はサムネのみ消し、再生枠は残す
     } else if (kind === 'avatar'){
-      img.style.visibility = 'hidden';
+      /* 高解像度版が無いアカウントは元URLへ戻す。それも駄目なら隠す */
+      const fb = img.dataset.fb;
+      if (fb && !img.dataset.fbTried && img.getAttribute('src') !== fb){
+        img.dataset.fbTried = '1';
+        img.src = fb;
+      } else {
+        img.style.visibility = 'hidden';
+      }
     }
   }, true);
 
@@ -1682,6 +1727,7 @@ window.__xbm = {
   state, buildBackup, handleFiles,
   importCSV, importJSON,
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
+  twimgSized, mediaHTML, avatarHTML,
   storageOk: () => store.ok,
   fsync, fsyncWrite, fsyncAdoptFile, mergeArchive, trimHistory,
 };
