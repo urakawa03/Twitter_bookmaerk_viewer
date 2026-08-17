@@ -278,6 +278,7 @@ kbd{
     <div class="t-folders" id="t-folders"></div>
     <div class="t-acts">
       <button id="t-skip">スキップ <kbd>Enter</kbd></button>
+      <button id="t-trash">🗑 ゴミ箱へ <kbd>Del</kbd></button>
       <button id="t-undo">取り消し <kbd>←</kbd></button>
     </div>
   </div>
@@ -1461,7 +1462,9 @@ function renderTriage(){
   $('#t-prog').textContent = done ? `完了（${total} / ${total}）` : `${triage.idx + 1} / ${total}`;
   const assigned = triage.stack.filter(e => e.action === 'assign').length;
   const skipped = triage.stack.filter(e => e.action === 'skip').length;
-  $('#t-stat').textContent = `割当 ${assigned} / スキップ ${skipped}`;
+  const trashed = triage.stack.filter(e => e.action === 'trash').length;
+  $('#t-stat').textContent = `割当 ${assigned} / スキップ ${skipped}`
+    + (trashed ? ` / 🗑 ${trashed}` : '');
   const tbtn = (f, label) => {
     const i = state.folders.indexOf(f);
     const key = i > -1 && i < 9 ? `<b>${i + 1}</b>` : '';
@@ -1497,6 +1500,16 @@ function triageSkip(){
   triage.idx++;
   renderTriage();
 }
+/* 整理中にゴミ箱へ（非表示にするだけでデータは残る） */
+function triageTrash(){
+  if (triage.idx >= triage.queue.length) return;
+  const it = triage.queue[triage.idx];
+  triage.stack.push({ id: it.id, action: 'trash', prev: it.c, prevTr: it.tr || 0 });
+  it.tr = Date.now();
+  triage.idx++;
+  saveItems([it]);
+  renderTriage();
+}
 function triageUndo(){
   const e = triage.stack.pop();
   if (!e) return;
@@ -1504,6 +1517,9 @@ function triageUndo(){
   if (e.action === 'assign'){
     const it = state.items.get(e.id);
     if (it){ it.c = e.prev; saveItems([it]); }
+  } else if (e.action === 'trash'){
+    const it = state.items.get(e.id);
+    if (it){ it.tr = e.prevTr || 0; saveItems([it]); }
   }
   renderTriage();
 }
@@ -1644,6 +1660,7 @@ function bindEvents(){
   $('#btn-triage').addEventListener('click', openTriage);
   $('#t-close').addEventListener('click', closeTriage);
   $('#t-skip').addEventListener('click', triageSkip);
+  $('#t-trash').addEventListener('click', triageTrash);
   $('#t-undo').addEventListener('click', triageUndo);
   $('#t-folders').addEventListener('click', e => {
     const b = e.target.closest('[data-tassign]');
@@ -1659,6 +1676,7 @@ function bindEvents(){
     if (triage.open){
       if (e.key === 'Escape'){ e.preventDefault(); closeTriage(); return; }
       if (e.key === 'Enter'){ e.preventDefault(); triageSkip(); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); triageTrash(); return; }
       if (e.key === 'ArrowLeft'){ e.preventDefault(); triageUndo(); return; }
       if (/^[1-9]$/.test(e.key)){
         const f = state.folders[+e.key - 1];
