@@ -126,6 +126,32 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
 .trashbtn:hover{color:var(--danger); border-color:var(--danger)}
 .trashbtn.restore{color:var(--accent); border-color:var(--accent)}
 .card.trashed{opacity:.75; background:var(--bg)}
+
+/* ---------- memo（フォルダとは別レイヤーの短いメモ） ---------- */
+.memo{margin-top:8px; padding-top:8px; border-top:1px dashed var(--line)}
+.memo-add{
+  border:1px solid var(--line); background:var(--card); color:var(--sub);
+  border-radius:12px; padding:2px 10px; font-size:12px;
+}
+.memo-add:hover{color:var(--accent); border-color:var(--accent)}
+.memo-view{
+  white-space:pre-wrap; word-break:break-word; font-size:14px; cursor:text;
+  background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 10px;
+}
+.memo-mark{display:block; margin-top:4px; color:var(--sub); font-size:12px}
+.memo-edit{
+  display:block; width:100%; box-sizing:border-box; min-height:64px; resize:vertical;
+  font:inherit; font-size:14px; padding:6px 10px; border-radius:8px;
+  border:1px solid var(--accent); background:var(--card); color:var(--ink);
+}
+.memo-hint{color:var(--sub); font-size:11px; margin-top:2px}
+.exp-opt{display:flex; align-items:center; gap:6px; font-size:13px; margin:3px 0}
+.exp-preview{
+  display:block; width:100%; box-sizing:border-box; height:220px; resize:vertical;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
+  padding:8px; border:1px solid var(--line); border-radius:8px;
+  background:var(--bg); color:var(--ink); white-space:pre; overflow:auto;
+}
 .fchips{
   display:flex; gap:6px 10px; flex-wrap:wrap; margin-top:8px; padding-top:8px;
   border-top:1px solid var(--line); align-items:flex-start;
@@ -275,8 +301,10 @@ kbd{
     <button class="tbtn" id="f-media">メディア</button>
     <button class="tbtn" id="f-quote">引用</button>
     <button class="tbtn" id="f-long">長文</button>
+    <button class="tbtn" id="f-memo">メモ</button>
     <button class="tbtn" id="userchip" hidden></button>
     <button class="tbtn" id="btn-triage">整理モード</button>
+    <button class="tbtn" id="btn-export">📤 出力</button>
     <button class="tbtn primary" id="btn-import">取込</button>
     <button class="tbtn" id="btn-data">データ管理</button>
   </div>
@@ -362,6 +390,40 @@ kbd{
     <h3>危険な操作</h3>
     <button class="mini danger" id="btn-wipe">書庫を全削除</button>
     <p style="font-size:12px;color:var(--sub)" id="storage-note"></p>
+  </div>
+</dialog>
+
+<dialog id="dlg-export">
+  <div class="dlg-in">
+    <button class="dlg-close" id="exp-x" aria-label="閉じる">✕</button>
+    <h2>Obsidian へ出力</h2>
+    <p style="font-size:13px;color:var(--sub);margin:4px 0">
+      メモを書いたポストを <code>40_Materials/2026.md</code> にそのまま追記できる書式でまとめます。
+      出力してもメモは消えません（出力日の印が付き、既定では次回から対象外になります）。
+    </p>
+
+    <h3>出力対象</h3>
+    <label class="exp-opt"><input type="radio" name="exp-target" value="new">未出力のみ　<span id="exp-n-new">0</span> 件</label>
+    <label class="exp-opt"><input type="radio" name="exp-target" value="edited">出力後に編集したもの　<span id="exp-n-edited">0</span> 件</label>
+    <label class="exp-opt"><input type="radio" name="exp-target" value="all">すべて　<span id="exp-n-all">0</span> 件</label>
+    <label class="exp-opt"><input type="checkbox" id="exp-scope">いま絞り込んでいる範囲だけ（タブ・検索・フィルタを反映）</label>
+
+    <h3>並び順</h3>
+    <label class="exp-opt"><input type="radio" name="exp-order" value="memo">メモを書いた順（古い順）</label>
+    <label class="exp-opt"><input type="radio" name="exp-order" value="tweet">投稿が新しい順</label>
+
+    <h3>原文の引用</h3>
+    <label class="exp-opt"><input type="number" id="exp-quote" min="0" max="2000" step="10" style="width:80px">字まで（0 で原文なし）</label>
+
+    <h3>プレビュー<span id="exp-count" style="font-weight:400;font-size:12px;color:var(--sub);margin-left:8px"></span></h3>
+    <textarea class="exp-preview" id="exp-preview" readonly aria-label="出力プレビュー"></textarea>
+
+    <div class="rowform" style="margin-top:8px">
+      <button class="mini" id="exp-copy">📋 クリップボードにコピー</button>
+      <button class="mini" id="exp-dl">⬇ .md をダウンロード</button>
+    </div>
+    <label class="exp-opt"><input type="checkbox" id="exp-mark">出力したものに「出力済」の印を付ける</label>
+    <div class="rowform"><button class="mini" id="exp-undo">直前の印を取り消す</button></div>
   </div>
 </dialog>
 
@@ -478,7 +540,7 @@ const state = {
   items: new Map(),                 // id -> item
   folders: DEFAULT_FOLDERS.slice(),
   history: [],                      // {name, added, dup, date}
-  view: { q: '', media: false, quote: false, long: false, user: null, sort: 'new', seed: 0, folder: '__all' },
+  view: { q: '', media: false, quote: false, long: false, memo: false, user: null, sort: 'new', seed: 0, folder: '__all' },
   cur: [],                          // filtered+sorted array
   rendered: 0,
   lastBackupAt: null,
@@ -611,6 +673,7 @@ function mergeArchive(data){
       }
       if (!ex.qd && raw.qd && typeof raw.qd === 'object'){ ex.qd = raw.qd; changed.push(ex); }
       if (!ex.tr && Number(raw.tr)){ ex.tr = Number(raw.tr); changed.push(ex); }
+      if (adoptMemo(ex, raw)) changed.push(ex);
     }
   }
   if (Array.isArray(data.history)){
@@ -738,7 +801,7 @@ function applyViewState(vs){
   const v = vs.view;
   state.view = {
     q: typeof v.q === 'string' ? v.q : '',
-    media: !!v.media, quote: !!v.quote, long: !!v.long,
+    media: !!v.media, quote: !!v.quote, long: !!v.long, memo: !!v.memo,
     user: v.user || null,
     sort: (v.sort === 'rand' || SORTS[v.sort]) ? v.sort : 'new',
     seed: Number(v.seed) || 0,
@@ -817,6 +880,9 @@ function normalizeRecord(rec){
     ord: 0,       // エクスポート内での並び順（先頭ほど新しいブックマーク）
     tr: 0,        // ゴミ箱に入れた時刻（0 = 通常表示）
     qd: null,     // 引用データ（metadata 付き JSON から抽出）
+    n: '',        // メモ（フォルダ割当とは別レイヤー。空 = メモなし）
+    nAt: 0,       // メモ最終更新時刻
+    nEx: 0,       // 最後にエクスポートした時刻（0 = 未出力）
   };
 }
 
@@ -945,6 +1011,8 @@ async function restoreBackup(data, fname){
       /* ゴミ箱状態も手作業の資産なのでバックアップから復元する */
       const tr = Number(raw.tr) || 0;
       if (tr !== (ex.tr || 0)){ ex.tr = tr; changed.push(ex); }
+      /* メモも手作業の資産。新しい方を残す */
+      if (adoptMemo(ex, raw)) changed.push(ex);
     } else {
       const it = normalizeBackupItem(raw);
       if (it){ state.items.set(it.id, it); changed.push(it); added++; }
@@ -981,7 +1049,28 @@ function normalizeBackupItem(raw){
     ord: Number(raw.ord) || 0,
     tr: Number(raw.tr) || 0,
     qd: raw.qd && typeof raw.qd === 'object' ? raw.qd : null,
+    n: typeof raw.n === 'string' ? raw.n : '',
+    nAt: Number(raw.nAt) || 0,
+    nEx: Number(raw.nEx) || 0,
   };
+}
+
+/* メモは手作業の資産。フォルダ割当（既存優先）と違い繰り返し編集されるので、
+ * マージでは nAt が新しい方を採用する。出力済の印 nEx はどちらかで付いていれば付いたまま。
+ * 変化があったら true を返す。 */
+function adoptMemo(ex, raw){
+  let changed = false;
+  const rn = typeof raw.n === 'string' ? raw.n : '';
+  const rAt = Number(raw.nAt) || 0;
+  if (rn && rAt > (ex.nAt || 0) && rn !== ex.n){
+    ex.n = rn; ex.nAt = rAt; changed = true;
+  } else if (rn && !(ex.n || '')){
+    /* 相手にだけメモがある（nAt を持たない古いデータも拾う） */
+    ex.n = rn; ex.nAt = rAt || Date.now(); changed = true;
+  }
+  const rEx = Number(raw.nEx) || 0;
+  if (rEx > (ex.nEx || 0)){ ex.nEx = rEx; changed = true; }
+  return changed;
 }
 
 async function finishImport(res, fname, suffix = ''){
@@ -1051,12 +1140,14 @@ function itemMatches(it, v){
   if (v.media && !(it.media && it.media.length)) return false;
   if (v.quote && !(it.quoted_id || it.qd)) return false;
   if (v.long && it.text.length < 300) return false;
+  if (v.memo && !it.n) return false;
   if (v.user && it.screen_name !== v.user) return false;
   if (v.q){
     const q = v.q.toLowerCase();
     if (!(it.text.toLowerCase().includes(q)
        || it.name.toLowerCase().includes(q)
-       || it.screen_name.toLowerCase().includes(q))) return false;
+       || it.screen_name.toLowerCase().includes(q)
+       || (it.n || '').toLowerCase().includes(q))) return false;
   }
   return true;
 }
@@ -1199,8 +1290,24 @@ function folderChipsHTML(it){
   }).join('');
 }
 
+/* メモの「出力済」印。出力後に編集されていればそう出し分ける（思考の変化を残すため消さない） */
+function memoStampHTML(it){
+  if (!it.nEx) return '';
+  const d = new Date(it.nEx), p = n => String(n).padStart(2, '0');
+  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `<span class="memo-mark">→ ${day} ${(it.nAt || 0) > it.nEx ? '出力後に編集' : '出力済'}</span>`;
+}
+/* readonly（ゴミ箱の中）では既存メモを表示するだけで、編集も新規追加もさせない */
+function memoBlockHTML(it, readonly){
+  const n = it.n || '';
+  if (!n) return readonly ? '' : `<button class="memo-add" data-memo="${esc(it.id)}">📝 メモ</button>`;
+  const hook = readonly ? '' : ` data-memo="${esc(it.id)}" title="クリックで編集"`;
+  return `<div class="memo-view"${hook}>${esc(n)}${memoStampHTML(it)}</div>`;
+}
+
 function cardHTML(it, opts = {}){
   const chips = folderChipsHTML(it);
+  const memo = opts.noMemo ? '' : memoBlockHTML(it, !!it.tr);
   return `<article class="card${it.tr ? ' trashed' : ''}" data-cid="${esc(it.id)}">`
     + `<div class="chead">`
     +   avatarHTML(it.avatar, 'avatar')
@@ -1223,6 +1330,7 @@ function cardHTML(it, opts = {}){
           ? `<button class="trashbtn restore" data-restore="${esc(it.id)}" title="ゴミ箱から戻す">↩ 復元</button>`
           : `<button class="trashbtn" data-trash="${esc(it.id)}" title="ゴミ箱へ移動（データは残ります）">🗑</button>`)
     + `</div>`
+    + (memo ? `<div class="memo">${memo}</div>` : '')
     + (opts.noChips || it.tr ? '' : `<div class="fchips">${chips}</div>`)
     + `</article>`;
 }
@@ -1338,6 +1446,7 @@ function renderControls(){
   $('#f-media').classList.toggle('on', v.media);
   $('#f-quote').classList.toggle('on', v.quote);
   $('#f-long').classList.toggle('on', v.long);
+  $('#f-memo').classList.toggle('on', v.memo);
   const uc = $('#userchip');
   uc.hidden = !v.user;
   if (v.user) uc.textContent = `@${v.user} ✕`;
@@ -1528,6 +1637,234 @@ async function assignFolder(id, folder){
   renderDataDialog();
 }
 
+/* ================= memo（1ポスト1メモ。Obsidian の 40_Materials へ出す素） =================
+ * リスト全体の再描画（renderList）は #list を作り直すため、開いている入力欄が消えてしまう。
+ * メモの保存・取消では該当カードの .memo だけを差し替える。 */
+let memoEdit = null;
+
+function refreshMemoBlocks(id){
+  const it = state.items.get(id);
+  if (!it) return;
+  /* 保存は非同期なので、その間にユーザーが同じカードを開き直していたら触らない */
+  if (memoEdit && memoEdit.id === id) return;
+  document.querySelectorAll(`.card[data-cid="${CSS.escape(id)}"] .memo`).forEach(box => {
+    box.innerHTML = memoBlockHTML(it, !!it.tr);
+  });
+}
+
+function openMemoEditor(hook){
+  const id = hook.dataset.memo;
+  const it = state.items.get(id);
+  if (!it) return;
+  const box = hook.closest('.memo');
+  if (!box || box.querySelector('.memo-edit')) return;
+  if (memoEdit) closeMemoEditor(true);
+  box.innerHTML = `<textarea class="memo-edit" placeholder="このポストが自分の問題にどう触れたかを一行"></textarea>`
+    + `<div class="memo-hint">Ctrl / ⌘ + Enter で保存　Esc で取消（フォーカスを外しても保存されます）</div>`;
+  const ta = box.querySelector('.memo-edit');
+  ta.value = it.n || '';
+  memoEdit = { id, ta, done: false };
+  ta.addEventListener('blur', () => closeMemoEditor(true));
+  ta.addEventListener('keydown', e => {
+    e.stopPropagation();   /* グローバルの「/」ショートカット等と衝突させない */
+    if (e.key === 'Escape'){ e.preventDefault(); closeMemoEditor(false); }
+    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); closeMemoEditor(true); }
+  });
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+function closeMemoEditor(save){
+  if (!memoEdit || memoEdit.done) return;
+  memoEdit.done = true;
+  const { id, ta } = memoEdit;
+  const val = ta.value;
+  memoEdit = null;
+  if (save) setMemo(id, val);
+  else refreshMemoBlocks(id);
+}
+
+async function setMemo(id, text){
+  const it = state.items.get(id);
+  if (!it) return;
+  const val = String(text == null ? '' : text).trim();
+  if (val === (it.n || '')){ refreshMemoBlocks(id); return; }
+  it.n = val;
+  if (val){
+    it.nAt = Date.now();
+  } else {
+    /* メモを消したら出力履歴も無かったことにする（次に書いたら未出力扱い） */
+    it.nAt = 0; it.nEx = 0;
+  }
+  await saveItems([it]);
+  refreshMemoBlocks(id);
+}
+
+/* ================= Obsidian（40_Materials）へのエクスポート =================
+ * Vault 運用マニュアル §11 の Materials 追記型に合わせる: 日付＋メモ本文が主役で、
+ * 出典（原文の冒頭と URL）は字下げして従える。§4-7 のとおり URL だけでは後で開けないので
+ * 原文の冒頭を必ず添える。出力してもメモは消さず「出力済」の印を付ける（§11）。 */
+const EXPORT_DEFAULTS = { target: 'new', scope: 'all', order: 'memo', quote: 150, mark: true };
+let exportOpts = { ...EXPORT_DEFAULTS };
+let lastExportBatch = null;      /* セッション中だけ保持する「直前の印」取り消し用 */
+const EXPORT_INDENT = '      ';  /* 「MM-DD 」と同じ幅 */
+
+function memoState(it){
+  if (!it.n) return null;
+  if (!it.nEx) return 'new';
+  return (it.nAt || 0) > it.nEx ? 'edited' : 'done';
+}
+/* 出力候補（ゴミ箱は常に除外）。scope='view' なら現在の絞り込み結果だけを見る */
+function exportScope(){
+  const base = exportOpts.scope === 'view' ? state.cur : [...state.items.values()];
+  return base.filter(it => !it.tr && it.n);
+}
+function exportTargets(){
+  const arr = exportScope().filter(it => {
+    const st = memoState(it);
+    if (exportOpts.target === 'new') return st === 'new';
+    if (exportOpts.target === 'edited') return st === 'edited';
+    return true;
+  });
+  if (exportOpts.order === 'tweet') arr.sort(SORTS.new);
+  else arr.sort((a, b) => (a.nAt || 0) - (b.nAt || 0) || a.ts - b.ts);
+  return arr;
+}
+
+/* Materials の日付は「自分が書いた日」。同じ年なら MM-DD、年をまたぐ分だけ YYYY-MM-DD */
+function exportDate(ms, nowYear){
+  const d = new Date(ms || Date.now()), p = n => String(n).padStart(2, '0');
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return d.getFullYear() === nowYear ? md : `${d.getFullYear()}-${md}`;
+}
+/* 原文の冒頭。改行は潰して1行に収め、絵文字を割らないよう符号位置で数える */
+function exportQuoteLine(it, limit){
+  if (!limit) return '';
+  const t = (it.text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return (it.media && it.media.length) ? `${EXPORT_INDENT}> （本文なし・メディアのみ）` : '';
+  const chars = [...t];
+  const body = chars.length > limit ? chars.slice(0, limit).join('').replace(/\s+$/, '') + '…' : t;
+  return `${EXPORT_INDENT}> ${body}`;
+}
+function buildExport(items, opts){
+  const o = opts || exportOpts;
+  const nowYear = new Date().getFullYear();
+  const limit = Math.max(0, Number(o.quote) || 0);
+  const blocks = items.map(it => {
+    const lines = String(it.n || '').split('\n');
+    const q = exportQuoteLine(it, limit);
+    return [
+      `${exportDate(it.nAt, nowYear)} ${lines[0]}`,
+      ...lines.slice(1).map(l => EXPORT_INDENT + l),
+      ...(q ? [q] : []),
+      `${EXPORT_INDENT}@${it.screen_name} ${it.url}`,
+    ].join('\n');
+  });
+  return blocks.length ? blocks.join('\n\n') + '\n' : '';
+}
+
+async function saveExportOpts(){
+  if (!store.ok) return;
+  try { await store.setMeta('exportOpts', { ...exportOpts }); } catch (e){}
+}
+function applyExportOpts(raw){
+  if (!raw || typeof raw !== 'object') return;
+  if (['new', 'edited', 'all'].includes(raw.target)) exportOpts.target = raw.target;
+  if (['all', 'view'].includes(raw.scope)) exportOpts.scope = raw.scope;
+  if (['memo', 'tweet'].includes(raw.order)) exportOpts.order = raw.order;
+  const q = Number(raw.quote);
+  if (Number.isFinite(q) && q >= 0) exportOpts.quote = Math.min(2000, Math.round(q));
+  if (typeof raw.mark === 'boolean') exportOpts.mark = raw.mark;
+}
+
+function renderExportDialog(){
+  const counts = { new: 0, edited: 0, all: 0 };
+  for (const it of exportScope()){
+    const st = memoState(it);
+    if (!st) continue;
+    counts.all++;
+    if (st === 'new') counts.new++;
+    else if (st === 'edited') counts.edited++;
+  }
+  $('#exp-n-new').textContent = counts.new;
+  $('#exp-n-edited').textContent = counts.edited;
+  $('#exp-n-all').textContent = counts.all;
+  document.querySelectorAll('input[name="exp-target"]').forEach(r => { r.checked = r.value === exportOpts.target; });
+  document.querySelectorAll('input[name="exp-order"]').forEach(r => { r.checked = r.value === exportOpts.order; });
+  $('#exp-scope').checked = exportOpts.scope === 'view';
+  $('#exp-mark').checked = exportOpts.mark;
+  if ($('#exp-quote').value !== String(exportOpts.quote)) $('#exp-quote').value = exportOpts.quote;
+  const items = exportTargets();
+  const text = buildExport(items);
+  $('#exp-preview').value = text || '（出力する対象がありません）';
+  $('#exp-count').textContent = `${items.length} 件`;
+  $('#exp-copy').disabled = $('#exp-dl').disabled = !items.length;
+  $('#exp-undo').disabled = !lastExportBatch;
+}
+
+/* 印はコピー／ダウンロードが成功したときだけ付ける（プレビューを見ただけでは付かない） */
+async function markExported(items){
+  if (!exportOpts.mark || !items.length) return;
+  const t = Date.now();
+  lastExportBatch = items.map(it => [it.id, it.nEx || 0]);
+  for (const it of items) it.nEx = t;
+  await saveItems(items);
+  for (const it of items) refreshMemoBlocks(it.id);
+}
+async function undoExportMark(){
+  if (!lastExportBatch) return;
+  const changed = [];
+  for (const [id, prev] of lastExportBatch){
+    const it = state.items.get(id);
+    if (it){ it.nEx = prev; changed.push(it); }
+  }
+  lastExportBatch = null;
+  await saveItems(changed);
+  for (const it of changed) refreshMemoBlocks(it.id);
+  renderExportDialog();
+  toast('「出力済」の印を取り消しました');
+}
+
+async function copyExport(){
+  const items = exportTargets();
+  const text = buildExport(items);
+  if (!text){ toast('出力する対象がありません'); return; }
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (e){
+    /* file:// や権限拒否の環境向けフォールバック */
+    try {
+      const ta = $('#exp-preview');
+      ta.focus(); ta.select();
+      ok = document.execCommand('copy');
+    } catch (e2){ ok = false; }
+  }
+  if (!ok){ toast('コピーできませんでした。プレビューから手動でコピーしてください', 6000); return; }
+  await markExported(items);
+  renderExportDialog();
+  toast(`📋 ${items.length} 件をコピーしました${exportOpts.mark ? '（出力済の印を付けました）' : ''}`);
+}
+
+async function downloadExport(){
+  const items = exportTargets();
+  const text = buildExport(items);
+  if (!text){ toast('出力する対象がありません'); return; }
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  a.href = URL.createObjectURL(blob);
+  a.download = `materials-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  await markExported(items);
+  renderExportDialog();
+  toast(`⬇ ${items.length} 件を書き出しました${exportOpts.mark ? '（出力済の印を付けました）' : ''}`);
+}
+
 /* ================= lightbox（同じタブ内で画像を拡大） ================= */
 const lb = { list: [], idx: 0, open: false };
 function openLightbox(anchor){
@@ -1655,7 +1992,7 @@ function renderTriage(){
   if (done){
     body.innerHTML = `<div class="t-done">🎉 未分類アイテムの整理が終わりました。<br>「終了」または <kbd>Esc</kbd> で戻ります。</div>`;
   } else {
-    body.innerHTML = cardHTML(triage.queue[triage.idx], { noChips: true, noTrash: true });
+    body.innerHTML = cardHTML(triage.queue[triage.idx], { noChips: true, noTrash: true, noMemo: true });
     body.scrollTop = 0;
   }
 }
@@ -1721,6 +2058,7 @@ function bindEvents(){
   $('#f-media').addEventListener('click', () => { state.view.media = !state.view.media; renderControls(); renderList(); });
   $('#f-quote').addEventListener('click', () => { state.view.quote = !state.view.quote; renderControls(); renderList(); });
   $('#f-long').addEventListener('click', () => { state.view.long = !state.view.long; renderControls(); renderList(); });
+  $('#f-memo').addEventListener('click', () => { state.view.memo = !state.view.memo; renderControls(); renderList(); });
   $('#userchip').addEventListener('click', () => { state.view.user = null; renderControls(); renderList(); });
 
   $('#tabs').addEventListener('click', e => {
@@ -1741,6 +2079,9 @@ function bindEvents(){
       openLightbox(photo);
       return;
     }
+    const mh = e.target.closest('[data-memo]');
+    if (mh){ openMemoEditor(mh); return; }
+    if (e.target.closest('.memo-edit,.memo-hint')) return;
     const ub = e.target.closest('[data-user]');
     if (ub){ state.view.user = ub.dataset.user; renderControls(); renderList(); return; }
     const chip = e.target.closest('[data-assign]');
@@ -1842,6 +2183,34 @@ function bindEvents(){
   $('#fs-off').addEventListener('click', fsyncDisconnect);
   $('#fs-reconnect').addEventListener('click', fsyncReconnect);
 
+  /* 出力ダイアログ */
+  const edlg = $('#dlg-export');
+  $('#btn-export').addEventListener('click', () => {
+    if (memoEdit) closeMemoEditor(true);   /* 編集途中のメモを取りこぼさない */
+    renderExportDialog();
+    edlg.showModal();
+  });
+  $('#exp-x').addEventListener('click', () => edlg.close());
+  const onExportOpt = () => { saveExportOpts(); renderExportDialog(); };
+  edlg.addEventListener('change', e => {
+    const t = e.target;
+    if (t.name === 'exp-target') exportOpts.target = t.value;
+    else if (t.name === 'exp-order') exportOpts.order = t.value;
+    else if (t.id === 'exp-scope') exportOpts.scope = t.checked ? 'view' : 'all';
+    else if (t.id === 'exp-mark') exportOpts.mark = t.checked;
+    else if (t.id === 'exp-quote') return;   /* input で拾う */
+    else return;
+    onExportOpt();
+  });
+  $('#exp-quote').addEventListener('input', e => {
+    const v = Number(e.target.value);
+    exportOpts.quote = Number.isFinite(v) && v >= 0 ? Math.min(2000, Math.round(v)) : 0;
+    onExportOpt();
+  });
+  $('#exp-copy').addEventListener('click', copyExport);
+  $('#exp-dl').addEventListener('click', downloadExport);
+  $('#exp-undo').addEventListener('click', undoExportMark);
+
   /* 画像の拡大表示 */
   $('#lb-close').addEventListener('click', closeLightbox);
   $('#lb-img').addEventListener('click', closeLightbox);
@@ -1919,10 +2288,11 @@ async function boot(){
   let vs = null;
   if (store.ok){
     try {
-      const [items, folders, history, viewstate, lastBackupAt] = await Promise.all([
+      const [items, folders, history, viewstate, lastBackupAt, expOpts] = await Promise.all([
         store.getAllItems(), store.getMeta('folders'), store.getMeta('history'),
-        store.getMeta('viewstate'), store.getMeta('lastBackupAt'),
+        store.getMeta('viewstate'), store.getMeta('lastBackupAt'), store.getMeta('exportOpts'),
       ]);
+      applyExportOpts(expOpts);
       for (const it of items) state.items.set(it.id, it);
       if (Array.isArray(folders) && folders.length) state.folders = folders;
       if (Array.isArray(history)) state.history = history;
@@ -1958,6 +2328,8 @@ window.__xbm = {
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
   twimgSized, mediaHTML, avatarHTML, lb, currentAnchor, restoreAnchor,
   storageOk: () => store.ok,
+  setMemo, buildExport, exportTargets, memoState, adoptMemo,
+  exportOpts: () => exportOpts,
   fsync, fsyncWrite, fsyncAdoptFile, mergeArchive, trimHistory,
 };
 
