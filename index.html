@@ -209,6 +209,36 @@ kbd{
   padding:0 4px; font-size:12px; background:var(--bg);
 }
 
+/* 画像の拡大表示（同じタブ内） */
+#lightbox{
+  display:none; position:fixed; inset:0; z-index:150; background:rgba(0,0,0,.92);
+  align-items:center; justify-content:center; flex-direction:column;
+}
+#lightbox.show{display:flex}
+#lightbox img{
+  max-width:100%; max-height:100%; object-fit:contain; display:block;
+  cursor:zoom-out; user-select:none;
+}
+.lb-bar{
+  position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:10px;
+  padding:10px 14px; color:#fff; font-size:13px;
+  background:linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0));
+}
+.lb-bar .sp{flex:1}
+.lb-bar a{color:#8ecdf8}
+.lb-btn{
+  border:1px solid rgba(255,255,255,.5); background:rgba(0,0,0,.35); color:#fff;
+  border-radius:16px; padding:3px 12px; font-size:13px;
+}
+.lb-nav{
+  position:absolute; top:50%; transform:translateY(-50%);
+  border:0; background:rgba(0,0,0,.45); color:#fff; font-size:26px; line-height:1;
+  padding:14px 16px; border-radius:8px;
+}
+.lb-nav.prev{left:8px}
+.lb-nav.next{right:8px}
+.lb-nav[hidden]{display:none}
+
 #toast{
   position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:200;
   background:var(--ink); color:#fff; padding:10px 18px; border-radius:10px;
@@ -234,8 +264,10 @@ kbd{
     <span class="count" id="count"></span>
     <input id="search" type="search" placeholder="本文・名前・@ハンドルを検索" aria-label="検索">
     <select id="sort" aria-label="ソート">
-      <option value="new">新しい順</option>
-      <option value="old">古い順</option>
+      <option value="new">投稿が新しい順</option>
+      <option value="old">投稿が古い順</option>
+      <option value="bm">ブックマーク順</option>
+      <option value="cls">分類した順</option>
       <option value="fav">いいね数順</option>
       <option value="rand">ランダム</option>
     </select>
@@ -323,6 +355,18 @@ kbd{
     <p style="font-size:12px;color:var(--sub)" id="storage-note"></p>
   </div>
 </dialog>
+
+<div id="lightbox" role="dialog" aria-label="画像の拡大表示" aria-modal="true">
+  <div class="lb-bar">
+    <span id="lb-count"></span>
+    <span class="sp"></span>
+    <a id="lb-open" href="#" target="_blank" rel="noopener">原寸を別タブで開く</a>
+    <button class="lb-btn" id="lb-close">閉じる ✕</button>
+  </div>
+  <button class="lb-nav prev" id="lb-prev" aria-label="前の画像">‹</button>
+  <img id="lb-img" alt="">
+  <button class="lb-nav next" id="lb-next" aria-label="次の画像">›</button>
+</div>
 
 <input type="file" id="file-input" multiple accept=".csv,.json,text/csv,application/json" hidden>
 <div id="toast"></div>
@@ -546,7 +590,7 @@ function mergeArchive(data){
       }
     } else {
       if (!ex.c && typeof raw.c === 'string' && raw.c){
-        ex.c = raw.c; changed.push(ex);
+        ex.c = raw.c; ex.cAt = Number(raw.cAt) || 0; changed.push(ex);
         if (!state.folders.includes(ex.c)) state.folders.push(ex.c);
       }
       if (!ex.qd && raw.qd && typeof raw.qd === 'object'){ ex.qd = raw.qd; changed.push(ex); }
@@ -629,12 +673,12 @@ async function fsyncDisconnect(){
   toast('データファイル連携を解除しました（ファイル自体は残ります）');
 }
 
-/* 閲覧状態（検索・絞り込み・タブ・ソート・スクロール位置）の記憶 */
+/* 閲覧状態（検索・絞り込み・タブ・ソート）の記憶。スクロール位置は保存しない */
 let booting = true;
 let vsTimer = null;
 function persistViewStateNow(){
   if (!store.ok || booting) return;
-  try { store.setMeta('viewstate', { view: { ...state.view }, y: window.scrollY }); } catch (e){}
+  try { store.setMeta('viewstate', { view: { ...state.view } }); } catch (e){}
 }
 function persistViewState(){
   if (!store.ok || booting) return;
@@ -656,15 +700,6 @@ function applyViewState(vs){
   if (f !== '__all' && f !== '__none' && f !== '__trash' && !state.folders.includes(f)) state.view.folder = '__all';
   if (state.view.sort === 'rand' && !state.view.seed) state.view.seed = 1;
   $('#search').value = state.view.q;
-}
-function restoreScroll(y){
-  if (!y) return;
-  /* 保存位置まで届くようチャンクを先に展開してからスクロール */
-  let guard = 0;
-  while (state.rendered < state.cur.length
-      && document.documentElement.scrollHeight < y + window.innerHeight
-      && guard++ < 500) appendChunk();
-  window.scrollTo(0, y);
 }
 
 /* ================= CSV parsing ================= */
@@ -727,6 +762,9 @@ function normalizeRecord(rec){
     views: String(rec.views_count ?? '').trim() === '' ? null : toInt(rec.views_count),
     url: normalizeUrl(rec.url || `https://x.com/i/status/${id}`),
     c: '',        // フォルダ割当（未分類 = ''）
+    cAt: 0,       // フォルダに分類した時刻
+    at: 0,        // この書庫に取り込んだ時刻（インポート時に付与）
+    ord: 0,       // エクスポート内での並び順（先頭ほど新しいブックマーク）
     tr: 0,        // ゴミ箱に入れた時刻（0 = 通常表示）
     qd: null,     // 引用データ（metadata 付き JSON から抽出）
   };
@@ -803,11 +841,14 @@ async function importCSV(text, fname){
   const idx = {};
   header.forEach((h, i) => { idx[h] = i; });
   const recs = [];
+  const at = Date.now();
   for (let i = 1; i < rows.length; i++){
     const row = rows[i];
     const rec = {};
     for (const key of Object.keys(idx)) rec[key] = row[idx[key]];
-    recs.push(normalizeRecord(rec));
+    const r = normalizeRecord(rec);
+    if (r){ r.at = at; r.ord = i; }   /* 先頭行ほど新しいブックマーク */
+    recs.push(r);
   }
   return finishImport(mergeRecords(recs), fname);
 }
@@ -820,9 +861,11 @@ async function importJSON(text, fname){
   }
   if (!Array.isArray(data)) throw new Error('未知のJSON形式');
   /* (a) 通常 JSON / (b) metadata 付き JSON */
-  const recs = data.map(el => {
+  const jsonAt = Date.now();
+  const recs = data.map((el, i) => {
     if (!el || typeof el !== 'object') return null;
     const rec = normalizeRecord(el);
+    if (rec){ rec.at = jsonAt; rec.ord = i + 1; }
     if (rec && el.metadata){
       try { rec.qd = extractQd(el.metadata); } catch (e){ /* metadata 破損は無視 */ }
       /* metadata に quoted_status_result が無くても quoted_id はそのまま */
@@ -848,7 +891,7 @@ async function restoreBackup(data, fname){
     if (ex){
       dup++;
       /* 既存には割当（c）のみ適用 */
-      if (raw.c && raw.c !== ex.c){ ex.c = raw.c; changed.push(ex); }
+      if (raw.c && raw.c !== ex.c){ ex.c = raw.c; ex.cAt = Number(raw.cAt) || 0; changed.push(ex); }
       /* ゴミ箱状態も手作業の資産なのでバックアップから復元する */
       const tr = Number(raw.tr) || 0;
       if (tr !== (ex.tr || 0)){ ex.tr = tr; changed.push(ex); }
@@ -883,6 +926,9 @@ function normalizeBackupItem(raw){
     views: raw.views == null ? null : toInt(raw.views),
     url: normalizeUrl(raw.url || `https://x.com/i/status/${id}`),
     c: typeof raw.c === 'string' ? raw.c : '',
+    cAt: Number(raw.cAt) || 0,
+    at: Number(raw.at) || 0,
+    ord: Number(raw.ord) || 0,
     tr: Number(raw.tr) || 0,
     qd: raw.qd && typeof raw.qd === 'object' ? raw.qd : null,
   };
@@ -968,6 +1014,11 @@ const SORTS = {
   new: (a, b) => b.ts - a.ts || (b.id < a.id ? -1 : 1),
   old: (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1),
   fav: (a, b) => b.fav - a.fav || b.ts - a.ts,
+  /* ブックマーク順（推定）: エクスポートはブックマークが新しい順に並ぶので、
+     取込が新しいファイルほど先、同一ファイル内は先頭行ほど新しいものとして扱う */
+  bm: (a, b) => (b.at || 0) - (a.at || 0) || (a.ord || 0) - (b.ord || 0) || b.ts - a.ts,
+  /* 分類した順（新しい順）。未分類は末尾へ */
+  cls: (a, b) => (b.cAt || 0) - (a.cAt || 0) || b.ts - a.ts,
   rand: null,   /* シード付きシャッフル（computeCur で特別扱い） */
 };
 /* id とシードから決まる安定した並び順。スクロール追加描画や再描画で並びが変わらない */
@@ -1358,7 +1409,7 @@ async function deleteFolder(f){
   if (!confirm(`フォルダ「${f}」を削除しますか？\n中のアイテムは未分類に戻ります。${note}`)) return;
   state.folders.splice(state.folders.indexOf(f), 1);
   const changed = [];
-  for (const it of state.items.values()) if (it.c === f){ it.c = ''; changed.push(it); }
+  for (const it of state.items.values()) if (it.c === f){ it.c = ''; it.cAt = 0; changed.push(it); }
   if (state.view.folder === f) state.view.folder = '__all';
   await saveItems(changed);
   await saveMeta();
@@ -1387,6 +1438,7 @@ async function assignFolder(id, folder){
   const it = state.items.get(id);
   if (!it) return;
   it.c = (it.c === folder) ? '' : folder; // 同じチップ再タップで解除
+  it.cAt = it.c ? Date.now() : 0;
   await saveItems([it]);
   renderTabs();
   /* 表示中のカードのチップだけ更新（リスト再構築を避ける） */
@@ -1394,6 +1446,49 @@ async function assignFolder(id, folder){
     b.classList.toggle('on', b.dataset.assign === it.c);
   });
   renderDataDialog();
+}
+
+/* ================= lightbox（同じタブ内で画像を拡大） ================= */
+const lb = { list: [], idx: 0, open: false };
+function openLightbox(anchor){
+  /* 同じメディアグリッド内の写真をまとめて対象にし、左右で送れるようにする */
+  const grid = anchor.closest('.media-grid');
+  const cells = grid ? [...grid.querySelectorAll('a[data-kind-wrap="photo"]')] : [anchor];
+  lb.list = cells.map(a => ({
+    full: a.getAttribute('href'),
+    /* 拡大表示は large 版を使う（原寸は巨大になりうるため） */
+    view: twimgSized(a.getAttribute('href'), 'large'),
+  }));
+  lb.idx = Math.max(0, cells.indexOf(anchor));
+  lb.open = true;
+  $('#lightbox').classList.add('show');
+  document.body.style.overflow = 'hidden';
+  showLightbox();
+  $('#lb-close').focus();
+}
+function showLightbox(){
+  const cur = lb.list[lb.idx];
+  if (!cur) return;
+  const img = $('#lb-img');
+  img.removeAttribute('srcset');
+  img.src = cur.view;
+  img.onerror = () => { if (img.getAttribute('src') !== cur.full) img.src = cur.full; };
+  $('#lb-open').href = cur.full;
+  $('#lb-count').textContent = lb.list.length > 1 ? `${lb.idx + 1} / ${lb.list.length}` : '';
+  const multi = lb.list.length > 1;
+  $('#lb-prev').hidden = !multi;
+  $('#lb-next').hidden = !multi;
+}
+function moveLightbox(d){
+  if (lb.list.length < 2) return;
+  lb.idx = (lb.idx + d + lb.list.length) % lb.list.length;
+  showLightbox();
+}
+function closeLightbox(){
+  lb.open = false;
+  $('#lightbox').classList.remove('show');
+  $('#lb-img').removeAttribute('src');
+  document.body.style.overflow = '';
 }
 
 /* ================= trash（非表示にするだけ。JSON からは消さない） ================= */
@@ -1487,8 +1582,9 @@ function renderTriage(){
 function triageAssign(folder){
   if (triage.idx >= triage.queue.length) return;
   const it = triage.queue[triage.idx];
-  triage.stack.push({ id: it.id, action: 'assign', prev: it.c });
+  triage.stack.push({ id: it.id, action: 'assign', prev: it.c, prevCAt: it.cAt || 0 });
   it.c = folder;
+  it.cAt = Date.now();
   triage.idx++;          /* 状態は同期更新（キー連打でも二重割当しない） */
   saveItems([it]);       /* 永続化は非同期でよい */
   renderTriage();
@@ -1516,7 +1612,7 @@ function triageUndo(){
   triage.idx = Math.max(0, triage.idx - 1);
   if (e.action === 'assign'){
     const it = state.items.get(e.id);
-    if (it){ it.c = e.prev; saveItems([it]); }
+    if (it){ it.c = e.prev; it.cAt = e.prevCAt || 0; saveItems([it]); }
   } else if (e.action === 'trash'){
     const it = state.items.get(e.id);
     if (it){ it.tr = e.prevTr || 0; saveItems([it]); }
@@ -1561,6 +1657,12 @@ function bindEvents(){
   $('#list').addEventListener('click', e => {
     const play = e.target.closest('[data-play]');
     if (play){ playVideo(play); return; }
+    const photo = e.target.closest('a[data-kind-wrap="photo"]');
+    if (photo && !e.metaKey && !e.ctrlKey && e.button === 0){
+      e.preventDefault();          /* 別タブではなくその場で拡大 */
+      openLightbox(photo);
+      return;
+    }
     const ub = e.target.closest('[data-user]');
     if (ub){ state.view.user = ub.dataset.user; renderControls(); renderList(); return; }
     const chip = e.target.closest('[data-assign]');
@@ -1656,6 +1758,16 @@ function bindEvents(){
   $('#fs-off').addEventListener('click', fsyncDisconnect);
   $('#fs-reconnect').addEventListener('click', fsyncReconnect);
 
+  /* 画像の拡大表示 */
+  $('#lb-close').addEventListener('click', closeLightbox);
+  $('#lb-img').addEventListener('click', closeLightbox);
+  $('#lb-prev').addEventListener('click', () => moveLightbox(-1));
+  $('#lb-next').addEventListener('click', () => moveLightbox(1));
+  $('#lightbox').addEventListener('click', e => {
+    /* 背景クリックで閉じる（画像・ボタン上は除く） */
+    if (e.target === $('#lightbox')) closeLightbox();
+  });
+
   /* 整理モード */
   $('#btn-triage').addEventListener('click', openTriage);
   $('#t-close').addEventListener('click', closeTriage);
@@ -1668,11 +1780,22 @@ function bindEvents(){
   });
   $('#t-body').addEventListener('click', e => {
     const play = e.target.closest('[data-play]');
-    if (play) playVideo(play);
+    if (play){ playVideo(play); return; }
+    const photo = e.target.closest('a[data-kind-wrap="photo"]');
+    if (photo && !e.metaKey && !e.ctrlKey && e.button === 0){
+      e.preventDefault();
+      openLightbox(photo);
+    }
   });
 
   /* キーボード */
   document.addEventListener('keydown', e => {
+    if (lb.open){
+      if (e.key === 'Escape'){ e.preventDefault(); closeLightbox(); }
+      else if (e.key === 'ArrowLeft'){ e.preventDefault(); moveLightbox(-1); }
+      else if (e.key === 'ArrowRight'){ e.preventDefault(); moveLightbox(1); }
+      return;
+    }
     if (triage.open){
       if (e.key === 'Escape'){ e.preventDefault(); closeTriage(); return; }
       if (e.key === 'Enter'){ e.preventDefault(); triageSkip(); return; }
@@ -1690,8 +1813,7 @@ function bindEvents(){
     }
   });
 
-  /* 閲覧位置の記録 */
-  window.addEventListener('scroll', persistViewState, { passive: true });
+  /* 閲覧状態の保存タイミング */
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') persistViewStateNow();
   });
@@ -1726,7 +1848,6 @@ async function boot(){
   bindEvents();
   renderAll();
   booting = false;
-  if (vs && vs.y) restoreScroll(vs.y);
   /* バックアップの経過リマインド（データ保護。手作業のフォルダ割当は資産） */
   if (store.ok && state.items.size > 0){
     const THIRTY_DAYS = 30 * 24 * 3600 * 1000;
@@ -1745,7 +1866,7 @@ window.__xbm = {
   state, buildBackup, handleFiles,
   importCSV, importJSON,
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
-  twimgSized, mediaHTML, avatarHTML,
+  twimgSized, mediaHTML, avatarHTML, lb,
   storageOk: () => store.ok,
   fsync, fsyncWrite, fsyncAdoptFile, mergeArchive, trimHistory,
 };
