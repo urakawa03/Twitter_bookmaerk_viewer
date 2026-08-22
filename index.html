@@ -328,6 +328,15 @@ kbd{
       <button class="mini" id="add-folder">追加</button>
     </div>
 
+    <h3>表示</h3>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px">
+      <input type="checkbox" id="opt-resume">
+      前回の位置から再開する（最後に見ていた投稿まで戻る）
+    </label>
+    <p style="font-size:12px;color:var(--sub);margin:4px 0 0">
+      オフにすると常に一覧の先頭から表示します。
+    </p>
+
     <h3>データファイル連携</h3>
     <p style="font-size:13px;color:var(--sub);margin:4px 0">
       書庫を手元の JSON ファイルへ自動保存します。アプリ（HTML）を差し替えても
@@ -473,6 +482,8 @@ const state = {
   cur: [],                          // filtered+sorted array
   rendered: 0,
   lastBackupAt: null,
+  resume: true,      // 前回の位置から再開する（アンカー方式）
+  anchor: null,      // { id, off } 画面最上部にあった投稿とそのズレ
 };
 
 /* ================= storage (IndexedDB / fallback) ================= */
@@ -678,12 +689,44 @@ async function fsyncDisconnect(){
   toast('データファイル連携を解除しました（ファイル自体は残ります）');
 }
 
-/* 閲覧状態（検索・絞り込み・タブ・ソート）の記憶。スクロール位置は保存しない */
+/* 閲覧状態（検索・絞り込み・タブ・ソート）と閲覧位置の記憶。
+   位置はピクセル座標ではなく「画面最上部にあった投稿の id」で覚える（アンカー方式）。
+   段階描画やカード高さの変動があっても同じ投稿の位置に戻れる。 */
 let booting = true;
 let vsTimer = null;
+function headerH(){
+  const h = document.querySelector('header');
+  return h ? h.getBoundingClientRect().height : 0;
+}
+/* 画面最上部に見えているカードを二分探索で特定する */
+function currentAnchor(){
+  const cards = $('#list').children;
+  if (!cards.length) return null;
+  const top = window.scrollY + headerH() + 1;
+  let lo = 0, hi = cards.length - 1, hit = 0;
+  while (lo <= hi){
+    const mid = (lo + hi) >> 1;
+    const r = cards[mid].getBoundingClientRect();
+    const cardTop = r.top + window.scrollY;
+    if (cardTop + r.height <= top) lo = mid + 1;
+    else { hit = mid; hi = mid - 1; }
+  }
+  const el = cards[hit];
+  if (!el || !el.dataset.cid) return null;
+  const elTop = el.getBoundingClientRect().top + window.scrollY;
+  return { id: el.dataset.cid, off: Math.round(top - elTop) };
+}
 function persistViewStateNow(){
   if (!store.ok || booting) return;
-  try { store.setMeta('viewstate', { view: { ...state.view } }); } catch (e){}
+  if (state.resume && window.scrollY > 0) state.anchor = currentAnchor();
+  else if (window.scrollY === 0) state.anchor = null;
+  try {
+    store.setMeta('viewstate', {
+      view: { ...state.view },
+      anchor: state.resume ? state.anchor : null,
+      resume: state.resume,
+    });
+  } catch (e){}
 }
 function persistViewState(){
   if (!store.ok || booting) return;
@@ -701,6 +744,8 @@ function applyViewState(vs){
     seed: Number(v.seed) || 0,
     folder: v.folder || '__all',
   };
+  if (typeof vs.resume === 'boolean') state.resume = vs.resume;
+  state.anchor = (state.resume && vs.anchor && vs.anchor.id) ? vs.anchor : null;
   const f = state.view.folder;
   if (f !== '__all' && f !== '__none' && f !== '__trash' && !state.folders.includes(f)) state.view.folder = '__all';
   if (state.view.sort === 'rand' && !state.view.seed) state.view.seed = 1;
@@ -1195,6 +1240,7 @@ function computeCur(){
   state.cur = arr;
 }
 
+let suppressScrollTop = false;
 function renderList(){
   computeCur();
   const list = $('#list');
@@ -1204,7 +1250,34 @@ function renderList(){
   $('#empty').hidden = state.items.size > 0;
   updateCount();
   persistViewState();
-  window.scrollTo(0, 0);   /* 一覧を作り直したときは常に先頭から */
+  /* 一覧を作り直したときは先頭から。起動直後の位置復元中だけは動かさない */
+  if (!suppressScrollTop) window.scrollTo(0, 0);
+}
+
+/* アンカー方式の位置復元: 覚えていた投稿が描画されるまでチャンクを展開してから合わせる */
+function restoreAnchor(){
+  const a = state.anchor;
+  if (!a || !a.id) return false;
+  const idx = state.cur.findIndex(it => it.id === a.id);
+  if (idx < 0) return false;                    /* 絞り込みやゴミ箱で対象外なら諦める */
+  let guard = 0;
+  while (state.rendered <= idx && guard++ < 1000) appendChunk();
+  const el = $('#list').querySelector(`.card[data-cid="${CSS.escape(a.id)}"]`);
+  if (!el) return false;
+  const align = () => {
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo(0, Math.max(0, top - headerH() + (a.off || 0)));
+  };
+  align();
+  /* 画像の遅延読み込みで高さが変わるため、しばらくは追従して合わせ直す。
+     ユーザーが自分でスクロールしたら追従をやめる */
+  let userMoved = false;
+  const onWheel = () => { userMoved = true; };
+  window.addEventListener('wheel', onWheel, { passive: true, once: true });
+  window.addEventListener('touchstart', onWheel, { passive: true, once: true });
+  window.addEventListener('keydown', onWheel, { once: true });
+  [120, 400, 900].forEach(ms => setTimeout(() => { if (!userMoved) align(); }, ms));
+  return true;
 }
 
 function updateCount(){
@@ -1304,6 +1377,7 @@ function renderDataDialog(){
   $('#storage-note').textContent = store.ok
     ? `保存先: このブラウザの IndexedDB（ローカルのみ・外部送信なし）${lastBk}`
     : '⚠ 保存不可モード: データはメモリ上のみです';
+  $('#opt-resume').checked = state.resume;
   const fs = $('#fsync-status');
   if (!fsync.supported){
     fs.textContent = '状態: このブラウザは未対応です（Chrome / Edge で利用できます）';
@@ -1755,6 +1829,12 @@ function bindEvents(){
     const d = e.target.closest('[data-delfolder]');
     if (d){ deleteFolder(d.dataset.delfolder); return; }
   });
+  $('#opt-resume').addEventListener('change', e => {
+    state.resume = e.target.checked;
+    if (!state.resume) state.anchor = null;
+    persistViewStateNow();
+    toast(state.resume ? '前回の位置から再開します' : '常に先頭から表示します');
+  });
   $('#btn-backup').addEventListener('click', downloadBackup);
   $('#btn-wipe').addEventListener('click', wipeAll);
   $('#fs-create').addEventListener('click', fsyncCreate);
@@ -1817,6 +1897,9 @@ function bindEvents(){
     }
   });
 
+  /* 閲覧位置（アンカー）の記録 */
+  window.addEventListener('scroll', persistViewState, { passive: true });
+
   /* 閲覧状態の保存タイミング */
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') persistViewStateNow();
@@ -1850,8 +1933,11 @@ async function boot(){
   await fsyncInit();   /* データファイル連携（あればファイルを読んでマージ） */
   applyViewState(vs);
   bindEvents();
+  suppressScrollTop = true;
   renderAll();
+  suppressScrollTop = false;
   booting = false;
+  if (!(state.resume && restoreAnchor())) window.scrollTo(0, 0);
   /* バックアップの経過リマインド（データ保護。手作業のフォルダ割当は資産） */
   if (store.ok && state.items.size > 0){
     const THIRTY_DAYS = 30 * 24 * 3600 * 1000;
@@ -1870,7 +1956,7 @@ window.__xbm = {
   state, buildBackup, handleFiles,
   importCSV, importJSON,
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
-  twimgSized, mediaHTML, avatarHTML, lb,
+  twimgSized, mediaHTML, avatarHTML, lb, currentAnchor, restoreAnchor,
   storageOk: () => store.ok,
   fsync, fsyncWrite, fsyncAdoptFile, mergeArchive, trimHistory,
 };
