@@ -545,7 +545,7 @@ const state = {
   rendered: 0,
   lastBackupAt: null,
   resume: true,      // 前回の位置から再開する（アンカー方式）
-  anchor: null,      // { id, off } 画面最上部にあった投稿とそのズレ
+  anchors: {},       // タブごとの { id, off }（画面最上部にあった投稿とそのズレ）
 };
 
 /* ================= storage (IndexedDB / fallback) ================= */
@@ -779,14 +779,25 @@ function currentAnchor(){
   const elTop = el.getBoundingClientRect().top + window.scrollY;
   return { id: el.dataset.cid, off: Math.round(top - elTop) };
 }
+/* 位置はタブ（すべて / 未分類 / 各フォルダ / ゴミ箱）ごとに別々に覚える */
+function anchorKey(){ return state.view.folder || '__all'; }
+function captureAnchor(){
+  if (!state.resume) return;
+  const key = anchorKey();
+  if (window.scrollY > 0){
+    const a = currentAnchor();
+    if (a) state.anchors[key] = a;
+  } else {
+    delete state.anchors[key];   /* 先頭まで戻したタブは記憶しない */
+  }
+}
 function persistViewStateNow(){
   if (!store.ok || booting) return;
-  if (state.resume && window.scrollY > 0) state.anchor = currentAnchor();
-  else if (window.scrollY === 0) state.anchor = null;
+  captureAnchor();
   try {
     store.setMeta('viewstate', {
       view: { ...state.view },
-      anchor: state.resume ? state.anchor : null,
+      anchors: state.resume ? { ...state.anchors } : {},
       resume: state.resume,
     });
   } catch (e){}
@@ -808,7 +819,10 @@ function applyViewState(vs){
     folder: v.folder || '__all',
   };
   if (typeof vs.resume === 'boolean') state.resume = vs.resume;
-  state.anchor = (state.resume && vs.anchor && vs.anchor.id) ? vs.anchor : null;
+  state.anchors = {};
+  if (state.resume && vs.anchors && typeof vs.anchors === 'object'){
+    for (const [k, a] of Object.entries(vs.anchors)) if (a && a.id) state.anchors[k] = a;
+  }
   const f = state.view.folder;
   if (f !== '__all' && f !== '__none' && f !== '__trash' && !state.folders.includes(f)) state.view.folder = '__all';
   if (state.view.sort === 'rand' && !state.view.seed) state.view.seed = 1;
@@ -1348,8 +1362,8 @@ function computeCur(){
   state.cur = arr;
 }
 
-let suppressScrollTop = false;
-function renderList(){
+/* mode: 'restore' なら記憶した位置へ戻す（起動時・タブ切替）。既定は先頭から */
+function renderList(mode = 'top'){
   computeCur();
   const list = $('#list');
   list.innerHTML = '';
@@ -1358,13 +1372,14 @@ function renderList(){
   $('#empty').hidden = state.items.size > 0;
   updateCount();
   persistViewState();
-  /* 一覧を作り直したときは先頭から。起動直後の位置復元中だけは動かさない */
-  if (!suppressScrollTop) window.scrollTo(0, 0);
+  if (mode === 'restore' && state.resume && restoreAnchor()) return;
+  window.scrollTo(0, 0);
 }
 
 /* アンカー方式の位置復元: 覚えていた投稿が描画されるまでチャンクを展開してから合わせる */
+let restoreToken = 0;
 function restoreAnchor(){
-  const a = state.anchor;
+  const a = state.anchors[anchorKey()];
   if (!a || !a.id) return false;
   const idx = state.cur.findIndex(it => it.id === a.id);
   if (idx < 0) return false;                    /* 絞り込みやゴミ箱で対象外なら諦める */
@@ -1372,7 +1387,10 @@ function restoreAnchor(){
   while (state.rendered <= idx && guard++ < 1000) appendChunk();
   const el = $('#list').querySelector(`.card[data-cid="${CSS.escape(a.id)}"]`);
   if (!el) return false;
+  const token = ++restoreToken;
   const align = () => {
+    /* 別のタブへ移った後などにカードが差し替わっていたら何もしない */
+    if (token !== restoreToken || !el.isConnected) return;
     const top = el.getBoundingClientRect().top + window.scrollY;
     window.scrollTo(0, Math.max(0, top - headerH() + (a.off || 0)));
   };
@@ -1380,10 +1398,10 @@ function restoreAnchor(){
   /* 画像の遅延読み込みで高さが変わるため、しばらくは追従して合わせ直す。
      ユーザーが自分でスクロールしたら追従をやめる */
   let userMoved = false;
-  const onWheel = () => { userMoved = true; };
-  window.addEventListener('wheel', onWheel, { passive: true, once: true });
-  window.addEventListener('touchstart', onWheel, { passive: true, once: true });
-  window.addEventListener('keydown', onWheel, { once: true });
+  const onMove = () => { userMoved = true; };
+  window.addEventListener('wheel', onMove, { passive: true, once: true });
+  window.addEventListener('touchstart', onMove, { passive: true, once: true });
+  window.addEventListener('keydown', onMove, { once: true });
   [120, 400, 900].forEach(ms => setTimeout(() => { if (!userMoved) align(); }, ms));
   return true;
 }
@@ -1454,10 +1472,10 @@ function renderControls(){
   $('#btn-shuffle').hidden = v.sort !== 'rand';
 }
 
-function renderAll(){
+function renderAll(mode = 'top'){
   renderTabs();
   renderControls();
-  renderList();
+  renderList(mode);
   renderDataDialog();
 }
 
@@ -2064,9 +2082,11 @@ function bindEvents(){
   $('#tabs').addEventListener('click', e => {
     const b = e.target.closest('[data-tab]');
     if (!b) return;
+    if (b.dataset.tab === state.view.folder) return;
+    captureAnchor();               /* 今いるタブの位置を確定してから離れる */
     state.view.folder = b.dataset.tab;
     renderTabs();
-    renderList();
+    renderList('restore');         /* 移動先のタブで前回の続きから */
   });
 
   /* リスト上の操作（委譲） */
@@ -2303,11 +2323,8 @@ async function boot(){
   await fsyncInit();   /* データファイル連携（あればファイルを読んでマージ） */
   applyViewState(vs);
   bindEvents();
-  suppressScrollTop = true;
-  renderAll();
-  suppressScrollTop = false;
   booting = false;
-  if (!(state.resume && restoreAnchor())) window.scrollTo(0, 0);
+  renderAll('restore');
   /* バックアップの経過リマインド（データ保護。手作業のフォルダ割当は資産） */
   if (store.ok && state.items.size > 0){
     const THIRTY_DAYS = 30 * 24 * 3600 * 1000;
@@ -2326,7 +2343,7 @@ window.__xbm = {
   state, buildBackup, handleFiles,
   importCSV, importJSON,
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
-  twimgSized, mediaHTML, avatarHTML, lb, currentAnchor, restoreAnchor,
+  twimgSized, mediaHTML, avatarHTML, lb, currentAnchor, restoreAnchor, captureAnchor, renderList,
   storageOk: () => store.ok,
   setMemo, buildExport, exportTargets, memoState, adoptMemo,
   exportOpts: () => exportOpts,
