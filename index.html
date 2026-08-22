@@ -375,6 +375,11 @@ kbd{
 (() => {
 'use strict';
 
+/* ブラウザ標準のスクロール位置復元を無効化する。
+   段階描画（60件ずつ）と組み合わさると、復元時点では本文が足りず
+   中途半端な位置に飛んでから伸びるため、位置が不安定になる。 */
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
 /* ================= utilities ================= */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g,
@@ -1199,6 +1204,7 @@ function renderList(){
   $('#empty').hidden = state.items.size > 0;
   updateCount();
   persistViewState();
+  window.scrollTo(0, 0);   /* 一覧を作り直したときは常に先頭から */
 }
 
 function updateCount(){
@@ -1633,12 +1639,10 @@ function bindEvents(){
     if (state.view.sort === 'rand' && !state.view.seed) state.view.seed = newSeed();
     renderControls();
     renderList();
-    window.scrollTo(0, 0);
   });
   $('#btn-shuffle').addEventListener('click', () => {
     state.view.seed = newSeed();
     renderList();
-    window.scrollTo(0, 0);
   });
   $('#f-media').addEventListener('click', () => { state.view.media = !state.view.media; renderControls(); renderList(); });
   $('#f-quote').addEventListener('click', () => { state.view.quote = !state.view.quote; renderControls(); renderList(); });
