@@ -78,8 +78,8 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
 .who{min-width:0; flex:1}
 .who .nm{font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .who .hd{font-size:13px}
-.who .hd button{border:0; background:none; color:var(--sub); padding:0}
-.who .hd button:hover{text-decoration:underline; color:var(--accent)}
+.who .hd a{color:var(--sub); text-decoration:none}
+.who .hd a:hover{text-decoration:underline; color:var(--accent)}
 .dt{color:var(--sub); font-size:12px; white-space:nowrap; text-align:right}
 .dt .tz{opacity:.7}
 .body{white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word}
@@ -268,7 +268,7 @@ kbd{
 .lb-info[hidden]{display:none}
 .lb-info .nm{color:#fff}
 .lb-info .dt,.lb-info .cfoot{color:#a8bccd}
-.lb-info .who .hd button{color:#a8bccd}
+.lb-info .who .hd a{color:#a8bccd}
 .lb-info .body{margin-top:4px; font-size:14px}
 .lb-info .quote{background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.18)}
 .lb-info .quote .ph,.lb-info .quote .hd{color:#a8bccd}
@@ -1412,6 +1412,13 @@ function imgSrcset(url){
 
 /* アバターは _normal（48px）だと高DPI画面でぼやけるので大きい版を使う。
  * 存在しない場合は data-fb の元URLへ自動で戻す。 */
+function handleHTML(sn){
+  const u = String(sn || '');
+  if (!u) return '';
+  /* @ID は絞り込みではなく、別タブで本人の X ホームを開く */
+  return `<a href="https://x.com/${esc(u)}" target="_blank" rel="noopener" title="Xでこのユーザーのホームを開く">@${esc(u)}</a>`;
+}
+
 function avatarHTML(url, cls){
   const u = String(url || '');
   if (!u) return `<span class="${cls}"></span>`;
@@ -1507,7 +1514,7 @@ function cardHTML(it, opts = {}){
     + `<div class="chead">`
     +   avatarHTML(it.avatar, 'avatar')
     +   `<div class="who"><div class="nm">${esc(it.name)}${it.text.length >= 300 ? '<span class="longmark">長文</span>' : ''}</div>`
-    +     `<div class="hd"><button data-user="${esc(it.screen_name)}" title="このユーザーで絞り込み">@${esc(it.screen_name)}</button></div></div>`
+    +     `<div class="hd">${handleHTML(it.screen_name)}</div></div>`
     +   `<div class="dt">${esc(it.dt)}<br><span class="tz">${esc(it.tz)}</span></div>`
     + `</div>`
     + `<div class="body">${renderText(it.text)}</div>`
@@ -2163,7 +2170,7 @@ function lbInfoHTML(entry){
     + `<div class="chead">`
     +   avatarHTML(it.avatar, 'avatar')
     +   `<div class="who"><div class="nm">${esc(it.name)}</div>`
-    +     `<div class="hd"><button data-user="${esc(it.screen_name)}" title="このユーザーで絞り込み">@${esc(it.screen_name)}</button></div></div>`
+    +     `<div class="hd">${handleHTML(it.screen_name)}</div></div>`
     +   `<div class="dt">${esc(it.dt)}<br><span class="tz">${esc(it.tz)}</span></div>`
     + `</div>`
     + `<div class="body">${renderText(it.text)}</div>`
@@ -2807,8 +2814,6 @@ function bindEvents(){
     const mh = e.target.closest('[data-memo]');
     if (mh){ openMemoEditor(mh); return; }
     if (e.target.closest('.memo-edit,.memo-hint')) return;
-    const ub = e.target.closest('[data-user]');
-    if (ub){ state.view.user = ub.dataset.user; renderControls(); renderList(); return; }
     const chip = e.target.closest('[data-assign]');
     if (chip){ assignFolder(chip.dataset.id, chip.dataset.assign); return; }
     const tb = e.target.closest('[data-trash]');
@@ -2974,14 +2979,6 @@ function bindEvents(){
     if (e.target.closest('.memo-edit,.memo-hint')) return;
     const chip = e.target.closest('[data-assign]');
     if (chip){ assignFolder(chip.dataset.id, chip.dataset.assign); return; }
-    const ub = e.target.closest('[data-user]');
-    if (ub){
-      const u = ub.dataset.user;
-      closeLightbox();
-      state.view.user = u;
-      renderControls();
-      renderList();
-    }
   });
   $('#lb-goto').addEventListener('click', () => {
     const id = lb.list[lb.idx] && lb.list[lb.idx].id;
