@@ -2200,8 +2200,10 @@ function moveLightbox(d){
 }
 function closeLightbox(){
   if (memoEdit) closeMemoEditor(true);
-  /* ステージの動画は再生枠ごと閉じるので、小窓へは移さずここで止める */
-  if (videoOnStage()) stopVideo();
+  /* ステージの動画は再生枠ごと閉じるので、小窓へは移さずここで止める。
+     読み込みエラーで <video> がステージから外れた後も player.cell はステージの
+     ままなので、こちらで判定して後始末を確実に走らせる */
+  if (player.cell === $('#lb-vcell')) stopVideo();
   resetLbStage();
   lb.open = false;
   $('#lightbox').classList.remove('show');
@@ -2259,7 +2261,7 @@ async function setTrashed(id, on){
 const MINI_SIZES = [220, 300, 400];
 const player = {
   video: null,      // 唯一の <video>
-  cell: null,       // いま紐づいている再生枠（カード内 or ギャラリーのタイル）
+  cell: null,       // いま紐づいている再生枠（カード内 or 拡大表示のステージ）
   cellHTML: '',     // その枠の元の中身（停止時に戻す）
   id: '',           // 再生中の投稿 id
   src: '', type: '',
@@ -2568,6 +2570,7 @@ function resetLbStage(){
 function playInLightbox(gi){
   const t = state.gal[gi];
   if (!t || !t.vid || !t.m.original) return;
+  if (memoEdit) closeMemoEditor(true);   /* パネルを作り直すので書きかけのメモを取りこぼさない */
   const cell = $('#lb-vcell');
   cell.dataset.original = t.m.original;
   cell.dataset.type = t.m.type || 'video';
@@ -2575,8 +2578,9 @@ function playInLightbox(gi){
   cell.hidden = false;
   $('#lb-img').hidden = true;
   $('#lb-play').hidden = true;
-  /* 同じ動画が小窓で鳴っていたら、頭出しし直さずステージへ呼び戻す */
-  if (player.video && player.src === cell.dataset.original){
+  /* 同じ動画が小窓で鳴っていたら、頭出しし直さずステージへ呼び戻す
+     （読み込みエラーで DOM から外れた動画は掴まず、作り直しに回す） */
+  if (player.video && player.video.isConnected && player.src === cell.dataset.original){
     player.cell = cell;
     player.cellHTML = '';
     dockInline();
