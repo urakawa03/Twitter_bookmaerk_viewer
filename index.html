@@ -162,13 +162,6 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
   background:var(--chip); color:var(--sub);
 }
 .fchip.on{background:var(--chip-on); border-color:var(--chip-on); color:#fff}
-/* 親フォルダから子がぶら下がるグループ表示 */
-.fgroup{display:flex; flex-direction:column; gap:3px; align-items:flex-start}
-.fkids{
-  display:flex; flex-wrap:wrap; gap:3px;
-  margin-left:11px; padding-left:8px; border-left:2px solid var(--line);
-}
-.fchip.ghost{opacity:.55; cursor:default; background:transparent}
 
 #sentinel{height:1px}
 
@@ -219,12 +212,6 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 .t-fbtn{
   padding:8px 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg);
 }
-.t-fgroup{display:flex; flex-direction:column; gap:4px; align-items:flex-start}
-.t-fkids{
-  display:flex; flex-wrap:wrap; gap:4px;
-  margin-left:14px; padding-left:10px; border-left:2px solid var(--line);
-}
-.t-fbtn.ghost{opacity:.55; cursor:default}
 .t-fbtn b{
   display:inline-block; min-width:18px; text-align:center; background:var(--ink); color:#fff;
   border-radius:4px; font-size:12px; margin-right:6px;
@@ -275,8 +262,6 @@ kbd{
 .lb-info .fchips,.lb-info .memo{border-color:rgba(255,255,255,.18)}
 .lb-info .fchip{background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.22); color:#dbe6ef}
 .lb-info .fchip.on{background:var(--accent); border-color:var(--accent); color:#fff}
-.lb-info .fchip.ghost{background:transparent}
-.lb-info .fkids{border-color:rgba(255,255,255,.22)}
 .lb-info .memo-view,.lb-info .memo-add{
   background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.22); color:#e7eef4;
 }
@@ -853,7 +838,6 @@ function mergeArchive(data){
     for (const h of data.history) if (h && h.name && !seen.has(h.name + '|' + h.date)) state.history.push(h);
   }
   trimHistory();
-  normalizeFolderOrder();
   saveItems(changed);
   saveMeta();
   return changed.length;
@@ -1327,10 +1311,7 @@ function itemMatches(it, v){
   if (v.folder === '__trash') return !!it.tr;
   if (it.tr) return false;
   if (v.folder === '__none'){ if (it.c) return false; }
-  else if (v.folder !== '__all'){
-    /* 親フォルダのタブはサブフォルダ（親/子）も含めて表示 */
-    if (!(it.c === v.folder || (it.c && it.c.startsWith(v.folder + '/')))) return false;
-  }
+  else if (v.folder !== '__all' && it.c !== v.folder) return false;
   if (v.media && !(it.media && it.media.length)) return false;
   if (v.quote && !(it.quoted_id || it.qd)) return false;
   if (v.long && it.text.length < 300) return false;
@@ -1479,17 +1460,11 @@ function quoteInner(q, qid, dt){
     + (qid ? `<div style="margin-top:4px"><a href="https://x.com/i/status/${esc(qid)}" target="_blank" rel="noopener" style="font-size:12px">元の投稿</a></div>` : '');
 }
 
-/* フォルダチップ: サブフォルダは親チップの下にツリー状にぶら下げる */
+/* フォルダチップ: フォルダは並列。名前に / があってもただの文字として扱う */
 function folderChipsHTML(it){
-  const chip = (f, label) =>
-    `<button class="fchip${it.c === f ? ' on' : ''}" data-assign="${esc(f)}" data-id="${esc(it.id)}" title="${it.c === f ? '割当を解除' : 'このフォルダに割当'}">${esc(label)}</button>`;
-  return buildGroups().map(g => {
-    if (!g.children.length) return g.parent ? chip(g.parent, g.parent) : '';
-    /* 親が削除済みでも子は残る: 親部分は飾りラベルにする */
-    const head = g.parent ? chip(g.parent, g.parent + '/') : `<span class="fchip ghost">${esc(g.key)}/</span>`;
-    const kids = g.children.map(f => chip(f, '/' + f.slice(g.key.length + 1))).join('');
-    return `<div class="fgroup">${head}<div class="fkids">${kids}</div></div>`;
-  }).join('');
+  return state.folders.map(f =>
+    `<button class="fchip${it.c === f ? ' on' : ''}" data-assign="${esc(f)}" data-id="${esc(it.id)}" title="${it.c === f ? '割当を解除' : 'このフォルダに割当'}">${esc(f)}</button>`
+  ).join('');
 }
 
 /* メモの「出力済」印。出力後に編集されていればそう出し分ける（思考の変化を残すため消さない） */
@@ -1708,18 +1683,7 @@ function renderTabs(){
   const tab = (key, label, n) =>
     `<button class="tab${t === key ? ' on' : ''}" data-tab="${esc(key)}">${esc(label)}<span class="n">${n}</span></button>`;
   let html = tab('__all', 'すべて', direct.__live) + tab('__none', '未分類', direct['']);
-  for (const f of state.folders){
-    const slash = f.indexOf('/');
-    if (slash === -1){
-      /* 親（または通常フォルダ）: サブフォルダ分を集計した件数を表示 */
-      const kids = state.folders.filter(k => k.startsWith(f + '/'));
-      html += tab(f, f, direct[f] + kids.reduce((s, k) => s + direct[k], 0));
-    } else {
-      const p = f.slice(0, slash);
-      const label = state.folders.includes(p) ? '/' + f.slice(slash + 1) : f;
-      html += tab(f, label, direct[f]);
-    }
-  }
+  for (const f of state.folders) html += tab(f, f, direct[f]);
   /* ゴミ箱タブ: 中身があるとき、または表示中のときだけ出す */
   if (direct.__trash > 0 || t === '__trash') html += tab('__trash', '🗑 ゴミ箱', direct.__trash);
   $('#tabs').innerHTML = html;
@@ -1756,16 +1720,14 @@ function renderAll(mode = 'top'){
 function renderDataDialog(){
   const fl = $('#folder-list');
   const direct = folderCounts();
-  fl.innerHTML = state.folders.map(f => {
-    const isChild = f.includes('/');
-    const label = isChild ? '└ ' + esc(f) : esc(f);
-    return `<li>${isChild ? '<span style="width:10px"></span>' : ''}<span>${label}</span>`
+  fl.innerHTML = state.folders.map(f =>
+    `<li><span>${esc(f)}</span>`
       + `<span class="n" style="color:var(--sub);font-size:12px">${direct[f]}件</span><span class="sp"></span>`
       + `<button class="mini" data-up="${esc(f)}" title="上へ">↑</button>`
       + `<button class="mini" data-down="${esc(f)}" title="下へ">↓</button>`
       + `<button class="mini" data-rename="${esc(f)}">改名</button>`
-      + `<button class="mini danger" data-delfolder="${esc(f)}">削除</button></li>`;
-  }).join('');
+      + `<button class="mini danger" data-delfolder="${esc(f)}">削除</button></li>`
+  ).join('');
   const hl = $('#history-list');
   hl.innerHTML = state.history.length
     ? state.history.slice().reverse().map(h =>
@@ -1794,61 +1756,20 @@ function renderDataDialog(){
   if (fsync.supported) $('#fs-off').disabled = fsync.status === 'off';
 }
 
-/* フォルダの親子グループ化: 「親/子」は親の直後にまとめて並べる */
-function buildGroups(){
-  const groups = [], map = new Map();
-  for (const f of state.folders){
-    const slash = f.indexOf('/');
-    const key = slash === -1 ? f : f.slice(0, slash);
-    let g = map.get(key);
-    if (!g){ g = { key, parent: null, children: [] }; map.set(key, g); groups.push(g); }
-    if (slash === -1) g.parent = f; else g.children.push(f);
-  }
-  return groups;
-}
-function flattenGroups(groups){
-  return groups.flatMap(g => (g.parent ? [g.parent] : []).concat(g.children));
-}
-function normalizeFolderOrder(){
-  state.folders = flattenGroups(buildGroups());
-}
-function validateFolderName(name){
-  if (!name) return 'フォルダ名を入力してください';
-  const parts = name.split('/');
-  if (parts.length > 2) return 'サブフォルダは「親/子」の1階層までです';
-  if (parts.some(p => p.trim() === '')) return 'フォルダ名の先頭・末尾に / は使えません';
-  return null;
-}
-
+/* フォルダは階層を持たない（「親/子」という書き方に特別な意味はない）。
+ * 既存の / 入りの名前はそのまま独立したフォルダとして残す。 */
 async function addFolder(name){
   name = name.trim();
   if (!name) return;
-  const err = validateFolderName(name);
-  if (err){ toast(err); return; }
   if (state.folders.includes(name)){ toast('同名のフォルダがあります'); return; }
   state.folders.push(name);
-  normalizeFolderOrder();
   await saveMeta();
   renderAll();
 }
 async function moveFolder(name, dir){
-  const groups = buildGroups();
-  const slash = name.indexOf('/');
-  if (slash === -1){
-    /* 親（または通常フォルダ）はサブフォルダごとブロックで移動 */
-    const gi = groups.findIndex(g => g.parent === name);
-    const ni = gi + dir;
-    if (gi < 0 || ni < 0 || ni >= groups.length) return;
-    [groups[gi], groups[ni]] = [groups[ni], groups[gi]];
-  } else {
-    /* 子は同じ親の中で移動 */
-    const g = groups.find(x => x.key === name.slice(0, slash));
-    if (!g) return;
-    const si = g.children.indexOf(name), ni = si + dir;
-    if (si < 0 || ni < 0 || ni >= g.children.length) return;
-    [g.children[si], g.children[ni]] = [g.children[ni], g.children[si]];
-  }
-  state.folders = flattenGroups(groups);
+  const i = state.folders.indexOf(name), ni = i + dir;
+  if (i < 0 || ni < 0 || ni >= state.folders.length) return;
+  [state.folders[i], state.folders[ni]] = [state.folders[ni], state.folders[i]];
   await saveMeta();
   renderAll();
 }
@@ -1858,35 +1779,18 @@ async function renameFolder(old){
   const name = prompt(`フォルダ「${old}」の新しい名前`, old);
   if (!name || name.trim() === '' || name.trim() === old) return;
   const nn = name.trim();
-  const err = validateFolderName(nn);
-  if (err){ toast(err); return; }
   if (state.folders.includes(nn)){ toast('同名のフォルダがあります'); return; }
-  const isParent = !old.includes('/');
-  const sub = f => nn + '/' + f.slice(old.length + 1);
   state.folders[i] = nn;
-  if (isParent){
-    /* 親の改名はサブフォルダ名も追随 */
-    for (let j = 0; j < state.folders.length; j++){
-      if (state.folders[j].startsWith(old + '/')) state.folders[j] = sub(state.folders[j]);
-    }
-  }
   const changed = [];
-  for (const it of state.items.values()){
-    if (it.c === old){ it.c = nn; changed.push(it); }
-    else if (isParent && it.c.startsWith(old + '/')){ it.c = sub(it.c); changed.push(it); }
-  }
+  for (const it of state.items.values()) if (it.c === old){ it.c = nn; changed.push(it); }
   if (state.view.folder === old) state.view.folder = nn;
-  else if (isParent && state.view.folder.startsWith(old + '/')) state.view.folder = sub(state.view.folder);
-  normalizeFolderOrder();
   await saveItems(changed);
   await saveMeta();
   renderAll();
 }
 async function deleteFolder(f){
   if (!state.folders.includes(f)) return;
-  const kids = f.includes('/') ? [] : state.folders.filter(k => k.startsWith(f + '/'));
-  const note = kids.length ? `\n（サブフォルダ ${kids.length} 件は残ります）` : '';
-  if (!confirm(`フォルダ「${f}」を削除しますか？\n中のアイテムは未分類に戻ります。${note}`)) return;
+  if (!confirm(`フォルダ「${f}」を削除しますか？\n中のアイテムは未分類に戻ります。`)) return;
   state.folders.splice(state.folders.indexOf(f), 1);
   const changed = [];
   for (const it of state.items.values()) if (it.c === f){ it.c = ''; it.cAt = 0; changed.push(it); }
@@ -2686,16 +2590,9 @@ function renderTriage(){
   const trashed = triage.stack.filter(e => e.action === 'trash').length;
   $('#t-stat').textContent = `割当 ${assigned} / スキップ ${skipped}`
     + (trashed ? ` / 🗑 ${trashed}` : '');
-  const tbtn = (f, label) => {
-    const i = state.folders.indexOf(f);
-    const key = i > -1 && i < 9 ? `<b>${i + 1}</b>` : '';
-    return `<button class="t-fbtn" data-tassign="${esc(f)}">${key}${esc(label)}</button>`;
-  };
-  $('#t-folders').innerHTML = buildGroups().map(g => {
-    if (!g.children.length) return g.parent ? tbtn(g.parent, g.parent) : '';
-    const head = g.parent ? tbtn(g.parent, g.parent + '/') : `<span class="t-fbtn ghost">${esc(g.key)}/</span>`;
-    const kids = g.children.map(f => tbtn(f, '/' + f.slice(g.key.length + 1))).join('');
-    return `<div class="t-fgroup">${head}<div class="t-fkids">${kids}</div></div>`;
+  $('#t-folders').innerHTML = state.folders.map((f, i) => {
+    const key = i < 9 ? `<b>${i + 1}</b>` : '';
+    return `<button class="t-fbtn" data-tassign="${esc(f)}">${key}${esc(f)}</button>`;
   }).join('');
   const body = $('#t-body');
   if (done){
