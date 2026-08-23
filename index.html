@@ -238,6 +238,10 @@ kbd{
   max-width:100%; max-height:100%; object-fit:contain; display:block;
   cursor:zoom-out; user-select:none;
 }
+/* 動画の再生枠: 写真と同じ場所で鳴らす（閉じると小窓へ引き継ぐ） */
+.lb-vcell{width:100%; height:100%; display:flex; align-items:center; justify-content:center}
+.lb-vcell[hidden]{display:none}
+.lb-vcell video{max-width:100%; max-height:100%; display:block; background:#000}
 .lb-play{
   position:absolute; left:50%; top:50%; transform:translate(-50%, -50%);
   border:1px solid rgba(255,255,255,.55); border-radius:24px; padding:10px 22px;
@@ -262,6 +266,7 @@ kbd{
 .lb-info .fchips,.lb-info .memo{border-color:rgba(255,255,255,.18)}
 .lb-info .fchip{background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.22); color:#dbe6ef}
 .lb-info .fchip.on{background:var(--accent); border-color:var(--accent); color:#fff}
+.lb-info .trashbtn{background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.28); color:#dbe6ef}
 .lb-info .memo-view,.lb-info .memo-add{
   background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.22); color:#e7eef4;
 }
@@ -573,6 +578,7 @@ body.gallery main{max-width:none; padding-left:6px; padding-right:6px}
     <div class="lb-stage">
       <button class="lb-nav prev" id="lb-prev" aria-label="前の画像">‹</button>
       <img id="lb-img" alt="">
+      <div class="lb-vcell" id="lb-vcell" hidden></div>
       <button class="lb-play" id="lb-play" hidden>▶ 動画を再生</button>
       <button class="lb-nav next" id="lb-next" aria-label="次の画像">›</button>
     </div>
@@ -1526,7 +1532,7 @@ function computeCur(){
 }
 
 /* mode: 'restore' なら記憶した位置へ戻す（起動時・タブ切替）。既定は先頭から */
-function renderList(mode = 'top'){
+function renderList(mode = 'top', anchor = null){
   computeCur();
   const gallery = state.view.mode === 'gallery';
   document.body.classList.toggle('gallery', gallery);
@@ -1547,7 +1553,8 @@ function renderList(mode = 'top'){
   updateCount();
   persistViewState();
   syncPlayer();          /* 再生中の動画を新しい DOM に繋ぎ直す（止めない） */
-  if (mode === 'restore' && state.resume && restoreAnchor()) return;
+  /* anchor 付き: 「前回の位置から再開」の設定とは別に、いま見ていた場所へ戻す */
+  if (mode === 'restore' && (anchor || state.resume) && restoreAnchor(anchor)) return;
   window.scrollTo(0, 0);
 }
 
@@ -1588,7 +1595,7 @@ function galleryTileHTML(t, i){
   const cell = vid
     ? `<button class="g-cell vid" data-play data-gi="${i}" data-cid="${esc(it.id)}"`
       + ` data-type="${esc(m.type)}" data-original="${esc(m.original)}"`
-      + ` title="クリックでミニプレーヤー再生（@${esc(it.screen_name)}）">`
+      + ` title="クリックで投稿を開いて再生（@${esc(it.screen_name)}）">`
       + img + `<span class="g-badge">${m.type === 'video' ? '▶ 動画' : 'GIF'}</span>` + who + `</button>`
     : `<a class="g-cell" data-kind-wrap="photo" data-gi="${i}" data-cid="${esc(it.id)}"`
       + ` href="${esc(m.original || base)}" target="_blank" rel="noopener"`
@@ -1600,8 +1607,8 @@ function galleryTileHTML(t, i){
 
 /* アンカー方式の位置復元: 覚えていた投稿が描画されるまでチャンクを展開してから合わせる */
 let restoreToken = 0;
-function restoreAnchor(){
-  const a = state.anchors[anchorKey()];
+function restoreAnchor(anchor){
+  const a = anchor || state.anchors[anchorKey()];
   if (!a || !a.id) return false;
   const idx = state.view.mode === 'gallery'
     ? state.gal.findIndex(t => t.it.id === a.id)
@@ -2069,7 +2076,8 @@ function lbInfoHTML(entry){
   const it = entry && entry.id ? state.items.get(entry.id) : null;
   if (!it) return `<div class="lb-none">この写真の投稿は書庫にありません。</div>`;
   const tile = entry.gi != null ? state.gal[entry.gi] : null;
-  const playable = tile && tile.vid ? tile : null;
+  /* すでにステージで鳴っている動画には再生ボタンを出さない */
+  const playable = tile && tile.vid && !(player.video && player.cell === $('#lb-vcell')) ? tile : null;
   return `<div class="lb-card" data-cid="${esc(it.id)}">`
     + `<div class="chead">`
     +   avatarHTML(it.avatar, 'avatar')
@@ -2086,6 +2094,9 @@ function lbInfoHTML(entry){
     +   (it.views != null ? `<span title="表示回数">👁 ${fmtNum(it.views)}</span>` : '')
     +   `<span class="sp"></span>`
     +   `<a href="${esc(it.url)}" target="_blank" rel="noopener">元の投稿</a>`
+    +   (it.tr
+          ? `<button class="trashbtn restore" data-restore="${esc(it.id)}" title="ゴミ箱から戻す">↩ 復元</button>`
+          : `<button class="trashbtn" data-trash="${esc(it.id)}" title="ゴミ箱へ移動（データは残ります）">🗑</button>`)
     + `</div>`
     + `<div class="memo">${memoBlockHTML(it, !!it.tr)}</div>`
     + (it.tr ? '' : `<div class="fchips">${folderChipsHTML(it)}</div>`)
@@ -2155,6 +2166,7 @@ function openLightbox(anchor, opts = {}){
 function showLightbox(){
   const cur = lb.list[lb.idx];
   if (!cur) return;
+  if (player.cell !== $('#lb-vcell')) resetLbStage();
   const img = $('#lb-img');
   img.removeAttribute('srcset');
   img.src = cur.view;
@@ -2179,11 +2191,26 @@ function moveLightbox(d){
 }
 function closeLightbox(){
   if (memoEdit) closeMemoEditor(true);
+  /* ステージで鳴っていた動画は、閉じても止めずに小窓へ移す（枠は消えるので常に小窓） */
+  const onStage = !!player.video && player.cell === $('#lb-vcell');
+  if (onStage){ player.pinned = true; dockMini(); }
+  resetLbStage();
+  if (onStage) syncPlayer();     /* ギャラリーのタイル側に「再生中」の印を戻す */
   lb.open = false;
   $('#lightbox').classList.remove('show');
   $('#lb-img').removeAttribute('src');
   $('#lb-info').innerHTML = '';
   document.body.style.overflow = '';
+}
+
+/* ギャラリーから投稿を消すとき、その位置に一番近い「残るタイル」を目印にする */
+function neighborTileAnchor(id){
+  const i = state.gal.findIndex(t => t.it.id === id);
+  if (i < 0) return null;
+  const after = state.gal.slice(i).find(t => t.it.id !== id);
+  if (after) return { id: after.it.id, off: 0 };
+  for (let j = i - 1; j >= 0; j--) if (state.gal[j].it.id !== id) return { id: state.gal[j].it.id, off: 0 };
+  return null;
 }
 
 /* ================= trash（非表示にするだけ。JSON からは消さない） ================= */
@@ -2192,6 +2219,15 @@ async function setTrashed(id, on){
   if (!it) return;
   it.tr = on ? Date.now() : 0;
   await saveItems([it]);
+  if (state.view.mode === 'gallery'){
+    /* ギャラリーは1投稿が複数タイルになりうるので、丸ごと並べ直して見ていた位置に戻す */
+    const a = currentAnchor();
+    const keep = a && a.id !== id ? a : neighborTileAnchor(id);
+    renderTabs();
+    renderList('restore', keep);
+    toast(on ? '🗑 ゴミ箱へ移動しました（データは残ります）' : '↩ 復元しました');
+    return;
+  }
   /* 現在のビューから外れるので、カードを畳んでから再集計 */
   const card = document.querySelector(`.card[data-cid="${CSS.escape(id)}"]`);
   if (card) card.remove();
@@ -2501,11 +2537,48 @@ async function toggleNativePiP(){
   }
 }
 
-/* パネルやステージのボタンから、そのタイルの動画をミニプレーヤーで再生する */
+/* 拡大表示のステージを写真に戻す（動画の枠は空にして隠す） */
+function resetLbStage(){
+  const cell = $('#lb-vcell');
+  if (cell.hidden) return;
+  cell.hidden = true;
+  cell.innerHTML = '';
+  delete cell.dataset.original;
+  delete cell.dataset.type;
+  delete cell.dataset.cid;
+  $('#lb-img').hidden = false;
+}
+
+/* ギャラリーの動画は、投稿を開いた形（ⓘ と同じ）のままステージで再生する */
+function playInLightbox(gi){
+  const t = state.gal[gi];
+  if (!t || !t.vid || !t.m.original) return;
+  const cell = $('#lb-vcell');
+  cell.dataset.original = t.m.original;
+  cell.dataset.type = t.m.type || 'video';
+  cell.dataset.cid = t.it.id;
+  cell.hidden = false;
+  $('#lb-img').hidden = true;
+  $('#lb-play').hidden = true;
+  /* 同じ動画が小窓で鳴っていたら、頭出しし直さずステージへ呼び戻す */
+  if (player.video && player.src === cell.dataset.original){
+    player.cell = cell;
+    player.cellHTML = '';
+    player.pinned = false;
+    dockInline();
+    watchCell();
+    renderLbInfo();
+    return;
+  }
+  playVideo(cell);
+  renderLbInfo();      /* パネルの「▶ この動画を再生」を引っ込める */
+}
+
+/* パネルやステージのボタンから、そのタイルの動画を再生する */
 function playFromGallery(gi){
   if (gi == null || !state.gal[gi]) return;
+  if (lb.open){ playInLightbox(gi); return; }
   const tile = $('#list').querySelector(`.g-cell[data-gi="${gi}"]`);
-  closeLightbox();
   if (tile) playVideo(tile, { mini: true });
 }
 
@@ -2701,7 +2774,17 @@ function bindEvents(){
       return;
     }
     const play = e.target.closest('[data-play]');
-    if (play){ playVideo(play, { mini: play.classList.contains('g-cell') }); return; }
+    if (play){
+      /* ギャラリーの動画タイルは、ⓘ と同じ「投稿を開いた形」でその場再生する */
+      if (play.classList.contains('g-cell')){
+        const gi = Number(play.dataset.gi);
+        openLightbox(null, { info: true, video: true, gi });
+        playInLightbox(gi);
+      } else {
+        playVideo(play);
+      }
+      return;
+    }
     const photo = e.target.closest('a[data-kind-wrap="photo"]');
     if (photo && !e.metaKey && !e.ctrlKey && e.button === 0){
       e.preventDefault();          /* 別タブではなくその場で拡大 */
@@ -2876,6 +2959,10 @@ function bindEvents(){
     if (e.target.closest('.memo-edit,.memo-hint')) return;
     const chip = e.target.closest('[data-assign]');
     if (chip){ assignFolder(chip.dataset.id, chip.dataset.assign); return; }
+    const tb = e.target.closest('[data-trash]');
+    if (tb){ const id = tb.dataset.trash; closeLightbox(); setTrashed(id, true); return; }
+    const rb = e.target.closest('[data-restore]');
+    if (rb){ const id = rb.dataset.restore; closeLightbox(); setTrashed(id, false); return; }
   });
   $('#lb-goto').addEventListener('click', () => {
     const id = lb.list[lb.idx] && lb.list[lb.idx].id;
