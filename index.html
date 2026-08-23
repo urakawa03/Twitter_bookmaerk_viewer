@@ -98,6 +98,7 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
   background:rgba(0,0,0,.18);
 }
 .m-cell video{width:100%; max-height:420px; display:block; background:#000}
+.m-cell.inmini .playbtn{background:rgba(29,155,240,.35); font-size:13px}
 .m-fail{color:#fff; font-size:13px; padding:16px; text-align:center}
 .m-fail a{color:#8ecdf8}
 
@@ -265,6 +266,66 @@ kbd{
 .lb-nav.next{right:8px}
 .lb-nav[hidden]{display:none}
 
+/* ---------- gallery view（写真をサムネイルで一覧する表示モード） ---------- */
+body.gallery main{max-width:1120px}
+.gallery-grid{display:grid; gap:6px; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr))}
+.g-cell{
+  position:relative; display:block; padding:0; overflow:hidden; aspect-ratio:1/1;
+  background:#0f1419; border:1px solid var(--line); border-radius:8px; cursor:zoom-in;
+}
+.g-cell img{width:100%; height:100%; object-fit:cover; display:block}
+.g-cell.vid{cursor:pointer}
+.g-cell:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.g-cell.playing{outline:3px solid var(--accent); outline-offset:-3px}
+.g-badge{
+  position:absolute; left:5px; top:5px; padding:0 6px; border-radius:4px;
+  background:rgba(0,0,0,.62); color:#fff; font-size:11px; line-height:18px;
+}
+.g-who{
+  position:absolute; left:0; right:0; bottom:0; padding:14px 6px 4px; text-align:left;
+  color:#fff; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  background:linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.7)); opacity:0; transition:opacity .15s;
+}
+.g-cell:hover .g-who,.g-cell:focus-visible .g-who{opacity:1}
+.g-empty{grid-column:1 / -1}
+@media (max-width:520px){
+  .gallery-grid{grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:4px}
+}
+
+/* ---------- mini player（再生中の動画を追いかける小窓） ----------
+   <video> は常に1つだけ作り、カード内とこの小窓の間を行き来させる。
+   一覧を描き直しても・フォルダタブを移っても再生が途切れない。 */
+#mini{
+  position:fixed; z-index:160; width:300px; max-width:calc(100vw - 8px);
+  display:flex; flex-direction:column; overflow:hidden;
+  background:#000; border:1px solid rgba(255,255,255,.28); border-radius:10px;
+  box-shadow:0 10px 30px rgba(0,0,0,.45);
+}
+#mini[hidden]{display:none}
+.mini-bar{
+  display:flex; align-items:center; gap:2px; padding:3px 4px 3px 8px; touch-action:none;
+  background:rgba(21,32,43,.96); color:#fff; font-size:12px; cursor:grab; user-select:none;
+}
+.mini-bar.dragging{cursor:grabbing}
+.mini-ttl{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.9}
+.mini-btn{
+  border:0; background:transparent; color:#fff; font-size:13px; line-height:1;
+  padding:4px 6px; border-radius:6px;
+}
+.mini-btn:hover{background:rgba(255,255,255,.2)}
+.mini-btn.on{background:var(--accent)}
+.mini-slot{position:relative; background:#000; cursor:pointer; min-height:60px}
+.mini-slot video{display:block; width:100%; max-height:60vh; background:#000}
+.mini-icon{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  color:#fff; font-size:34px; text-shadow:0 2px 10px rgba(0,0,0,.85);
+  opacity:0; transition:opacity .2s; pointer-events:none;
+}
+.mini-icon.show{opacity:1}
+.mini-seek{display:flex; align-items:center; height:14px; padding:0 6px; background:rgba(21,32,43,.96); cursor:pointer; touch-action:none}
+.mini-seek .bar{flex:1; height:3px; border-radius:2px; background:rgba(255,255,255,.28); overflow:hidden}
+.mini-seek .bar i{display:block; height:100%; width:0; background:var(--accent)}
+
 #toast{
   position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:200;
   background:var(--ink); color:#fff; padding:10px 18px; border-radius:10px;
@@ -298,6 +359,12 @@ kbd{
       <option value="rand">ランダム</option>
     </select>
     <button class="tbtn" id="btn-shuffle" hidden title="並びをシャッフル">🔀 シャッフル</button>
+    <button class="tbtn" id="btn-view" title="ギャラリー表示（写真・動画をサムネイルで一覧）">▦ ギャラリー</button>
+    <select id="gmedia" aria-label="ギャラリーに出す種類" hidden>
+      <option value="all">写真・動画</option>
+      <option value="photo">写真のみ</option>
+      <option value="video">動画のみ</option>
+    </select>
     <button class="tbtn" id="f-media">メディア</button>
     <button class="tbtn" id="f-quote">引用</button>
     <button class="tbtn" id="f-long">長文</button>
@@ -430,13 +497,29 @@ kbd{
 <div id="lightbox" role="dialog" aria-label="画像の拡大表示" aria-modal="true">
   <div class="lb-bar">
     <span id="lb-count"></span>
+    <span id="lb-who"></span>
     <span class="sp"></span>
+    <button class="lb-btn" id="lb-goto" hidden>この投稿を開く</button>
     <a id="lb-open" href="#" target="_blank" rel="noopener">原寸を別タブで開く</a>
     <button class="lb-btn" id="lb-close">閉じる ✕</button>
   </div>
   <button class="lb-nav prev" id="lb-prev" aria-label="前の画像">‹</button>
   <img id="lb-img" alt="">
   <button class="lb-nav next" id="lb-next" aria-label="次の画像">›</button>
+</div>
+
+<div id="mini" hidden aria-label="ミニプレーヤー">
+  <div class="mini-bar" id="mini-bar">
+    <span class="mini-ttl" id="mini-ttl"></span>
+    <button class="mini-btn" id="mini-size" title="大きさを変える">⤢</button>
+    <button class="mini-btn" id="mini-pip" title="ピクチャーインピクチャー（別のタブに移っても映像が残ります）">⧉</button>
+    <button class="mini-btn" id="mini-goto" title="この投稿を一覧で開く">↩</button>
+    <button class="mini-btn" id="mini-close" title="停止して閉じる（Esc）">✕</button>
+  </div>
+  <div class="mini-slot" id="mini-slot" role="button" tabindex="0" aria-label="クリックで再生 / 一時停止">
+    <div class="mini-icon" id="mini-icon">▶</div>
+  </div>
+  <div class="mini-seek" id="mini-seek" title="クリックで頭出し"><div class="bar"><i id="mini-prog"></i></div></div>
 </div>
 
 <input type="file" id="file-input" multiple accept=".csv,.json,text/csv,application/json" hidden>
@@ -540,8 +623,10 @@ const state = {
   items: new Map(),                 // id -> item
   folders: DEFAULT_FOLDERS.slice(),
   history: [],                      // {name, added, dup, date}
-  view: { q: '', media: false, quote: false, long: false, memo: false, user: null, sort: 'new', seed: 0, folder: '__all' },
+  view: { q: '', media: false, quote: false, long: false, memo: false, user: null, sort: 'new', seed: 0,
+          folder: '__all', mode: 'list', gmedia: 'all' },
   cur: [],                          // filtered+sorted array
+  gal: [],                          // ギャラリー表示のタイル（{it, m, vid}）
   rendered: 0,
   lastBackupAt: null,
   resume: true,      // 前回の位置から再開する（アンカー方式）
@@ -779,8 +864,11 @@ function currentAnchor(){
   const elTop = el.getBoundingClientRect().top + window.scrollY;
   return { id: el.dataset.cid, off: Math.round(top - elTop) };
 }
-/* 位置はタブ（すべて / 未分類 / 各フォルダ / ゴミ箱）ごとに別々に覚える */
-function anchorKey(){ return state.view.folder || '__all'; }
+/* 位置はタブ（すべて / 未分類 / 各フォルダ / ゴミ箱）ごとに別々に覚える。
+   リストとギャラリーは並びが違うので、表示モードも鍵に含める */
+function anchorKey(){
+  return (state.view.folder || '__all') + (state.view.mode === 'gallery' ? '@gallery' : '');
+}
 function captureAnchor(){
   if (!state.resume) return;
   const key = anchorKey();
@@ -799,6 +887,7 @@ function persistViewStateNow(){
       view: { ...state.view },
       anchors: state.resume ? { ...state.anchors } : {},
       resume: state.resume,
+      mini: { pos: miniPos, size: player.sizeIdx },
     });
   } catch (e){}
 }
@@ -817,7 +906,10 @@ function applyViewState(vs){
     sort: (v.sort === 'rand' || SORTS[v.sort]) ? v.sort : 'new',
     seed: Number(v.seed) || 0,
     folder: v.folder || '__all',
+    mode: v.mode === 'gallery' ? 'gallery' : 'list',
+    gmedia: ['all', 'photo', 'video'].includes(v.gmedia) ? v.gmedia : 'all',
   };
+  applyMiniState(vs.mini);
   if (typeof vs.resume === 'boolean') state.resume = vs.resume;
   state.anchors = {};
   if (state.resume && vs.anchors && typeof vs.anchors === 'object'){
@@ -1192,6 +1284,7 @@ function newSeed(){
 
 /* ================= rendering ================= */
 const CHUNK = 60;
+const GCHUNK = 120;   /* ギャラリーはカードより軽いので多めに描く */
 
 function renderText(text){
   const re = /(https?:\/\/[^\s<>"]+)|([#＃][^\s#＃.,、。！？!?()（）「」]+)/g;
@@ -1365,15 +1458,73 @@ function computeCur(){
 /* mode: 'restore' なら記憶した位置へ戻す（起動時・タブ切替）。既定は先頭から */
 function renderList(mode = 'top'){
   computeCur();
+  const gallery = state.view.mode === 'gallery';
+  document.body.classList.toggle('gallery', gallery);
   const list = $('#list');
+  list.className = gallery ? 'gallery-grid' : '';
   list.innerHTML = '';
   state.rendered = 0;
+  if (gallery){
+    computeGallery();
+    if (!state.gal.length && state.items.size){
+      list.innerHTML = `<div class="empty g-empty">この絞り込みに表示できる写真・動画はありません。</div>`;
+    }
+  } else {
+    state.gal = [];
+  }
   appendChunk();
   $('#empty').hidden = state.items.size > 0;
   updateCount();
   persistViewState();
+  syncPlayer();          /* 再生中の動画を新しい DOM に繋ぎ直す（止めない） */
   if (mode === 'restore' && state.resume && restoreAnchor()) return;
   window.scrollTo(0, 0);
+}
+
+/* ================= gallery view =================
+   いま絞り込まれている投稿のメディアだけを平らに並べる。
+   1投稿が複数枚持つので、タイルの並びは state.cur とは別に持つ。 */
+function isVideoMedia(m){ return m.type === 'video' || m.type === 'animated_gif'; }
+
+function computeGallery(){
+  const kind = state.view.gmedia;
+  const tiles = [];
+  for (const it of state.cur){
+    if (!it.media || !it.media.length) continue;
+    for (const m of it.media){
+      if (!m || (!m.original && !m.thumbnail)) continue;
+      const vid = isVideoMedia(m);
+      if (kind === 'photo' && vid) continue;
+      if (kind === 'video' && !vid) continue;
+      tiles.push({ it, m, vid });
+    }
+  }
+  state.gal = tiles;
+}
+
+function galleryTileHTML(t, i){
+  const { it, m, vid } = t;
+  /* 表示用の元画像: mp4 は直に表示できないのでサムネイルを使う */
+  const base = m.original && !/\.mp4(\?|$)/i.test(m.original) ? m.original : m.thumbnail;
+  const ss = /pbs\.twimg\.com/.test(String(base || ''))
+    ? ` srcset="${esc(twimgSized(base, 'small'))} 680w, ${esc(twimgSized(base, 'medium'))} 1200w"`
+      + ` sizes="(max-width: 520px) 33vw, 200px"`
+    : '';
+  const img = base
+    ? `<img data-kind="${vid ? 'thumb' : 'photo'}" data-fb="${esc(m.thumbnail || base)}" loading="lazy"`
+      + ` src="${esc(twimgSized(base, 'small'))}"${ss} alt="">`
+    : '';
+  const who = `<span class="g-who">@${esc(it.screen_name)}</span>`;
+  if (vid){
+    const label = m.type === 'video' ? '▶ 動画' : 'GIF';
+    return `<button class="g-cell vid" data-play data-gi="${i}" data-cid="${esc(it.id)}"`
+      + ` data-type="${esc(m.type)}" data-original="${esc(m.original)}"`
+      + ` title="クリックでミニプレーヤー再生（@${esc(it.screen_name)}）">`
+      + img + `<span class="g-badge">${label}</span>` + who + `</button>`;
+  }
+  return `<a class="g-cell" data-kind-wrap="photo" data-gi="${i}" data-cid="${esc(it.id)}"`
+    + ` href="${esc(m.original || base)}" target="_blank" rel="noopener"`
+    + ` title="クリックで拡大（@${esc(it.screen_name)}）">` + img + who + `</a>`;
 }
 
 /* アンカー方式の位置復元: 覚えていた投稿が描画されるまでチャンクを展開してから合わせる */
@@ -1381,11 +1532,13 @@ let restoreToken = 0;
 function restoreAnchor(){
   const a = state.anchors[anchorKey()];
   if (!a || !a.id) return false;
-  const idx = state.cur.findIndex(it => it.id === a.id);
+  const idx = state.view.mode === 'gallery'
+    ? state.gal.findIndex(t => t.it.id === a.id)
+    : state.cur.findIndex(it => it.id === a.id);
   if (idx < 0) return false;                    /* 絞り込みやゴミ箱で対象外なら諦める */
   let guard = 0;
   while (state.rendered <= idx && guard++ < 1000) appendChunk();
-  const el = $('#list').querySelector(`.card[data-cid="${CSS.escape(a.id)}"]`);
+  const el = $('#list').querySelector(`[data-cid="${CSS.escape(a.id)}"]`);
   if (!el) return false;
   const token = ++restoreToken;
   const align = () => {
@@ -1409,11 +1562,16 @@ function restoreAnchor(){
 function updateCount(){
   const total = folderCounts().__live;   /* ゴミ箱を除いた件数 */
   const shown = state.cur.length;
+  if (state.view.mode === 'gallery'){
+    $('#count').textContent = `${state.gal.length} 枚 / ${shown} 件`;
+    return;
+  }
   $('#count').textContent = (shown === total && state.view.folder !== '__trash')
     ? `${total} 件` : `${shown} / ${total} 件`;
 }
 
 function appendChunk(){
+  if (state.view.mode === 'gallery') return appendGalleryChunk();
   const list = $('#list');
   const end = Math.min(state.rendered + CHUNK, state.cur.length);
   if (state.rendered >= end) return;
@@ -1421,6 +1579,18 @@ function appendChunk(){
   for (let i = state.rendered; i < end; i++) html += cardHTML(state.cur[i]);
   list.insertAdjacentHTML('beforeend', html);
   state.rendered = end;
+  syncPlayer();
+}
+
+function appendGalleryChunk(){
+  const list = $('#list');
+  const end = Math.min(state.rendered + GCHUNK, state.gal.length);
+  if (state.rendered >= end) return;
+  let html = '';
+  for (let i = state.rendered; i < end; i++) html += galleryTileHTML(state.gal[i], i);
+  list.insertAdjacentHTML('beforeend', html);
+  state.rendered = end;
+  syncPlayer();
 }
 
 /* ゴミ箱の中身は各フォルダの件数に数えない */
@@ -1470,6 +1640,13 @@ function renderControls(){
   if (v.user) uc.textContent = `@${v.user} ✕`;
   $('#sort').value = v.sort;
   $('#btn-shuffle').hidden = v.sort !== 'rand';
+  const gallery = v.mode === 'gallery';
+  const bv = $('#btn-view');
+  bv.textContent = gallery ? '📋 リスト' : '▦ ギャラリー';
+  bv.classList.toggle('on', gallery);
+  bv.title = gallery ? 'リスト表示に戻す' : 'ギャラリー表示（写真・動画をサムネイルで一覧）';
+  $('#gmedia').hidden = !gallery;
+  $('#gmedia').value = v.gmedia;
 }
 
 function renderAll(mode = 'top'){
@@ -1886,15 +2063,33 @@ async function downloadExport(){
 /* ================= lightbox（同じタブ内で画像を拡大） ================= */
 const lb = { list: [], idx: 0, open: false };
 function openLightbox(anchor){
-  /* 同じメディアグリッド内の写真をまとめて対象にし、左右で送れるようにする */
-  const grid = anchor.closest('.media-grid');
-  const cells = grid ? [...grid.querySelectorAll('a[data-kind-wrap="photo"]')] : [anchor];
-  lb.list = cells.map(a => ({
-    full: a.getAttribute('href'),
+  const entry = (full, id) => ({
+    full,
     /* 拡大表示は large 版を使う（原寸は巨大になりうるため） */
-    view: twimgSized(a.getAttribute('href'), 'large'),
-  }));
-  lb.idx = Math.max(0, cells.indexOf(anchor));
+    view: twimgSized(full, 'large'),
+    id: id || '',
+  });
+  if (state.view.mode === 'gallery' && anchor.dataset.gi !== undefined){
+    /* ギャラリー: 描画済みのぶんだけでなく、絞り込み内の写真すべてを送れるようにする */
+    const gi = Number(anchor.dataset.gi);
+    const photos = [];
+    let idx = 0;
+    state.gal.forEach((t, i) => {
+      if (t.vid) return;
+      if (i === gi) idx = photos.length;
+      photos.push(entry(t.m.original || t.m.thumbnail, t.it.id));
+    });
+    lb.list = photos;
+    lb.idx = idx;
+  } else {
+    /* 同じメディアグリッド内の写真をまとめて対象にし、左右で送れるようにする */
+    const grid = anchor.closest('.media-grid');
+    const cells = grid ? [...grid.querySelectorAll('a[data-kind-wrap="photo"]')] : [anchor];
+    const host = anchor.closest('[data-cid]');
+    const id = host ? host.dataset.cid : '';
+    lb.list = cells.map(a => entry(a.getAttribute('href'), id));
+    lb.idx = Math.max(0, cells.indexOf(anchor));
+  }
   lb.open = true;
   $('#lightbox').classList.add('show');
   document.body.style.overflow = 'hidden';
@@ -1910,6 +2105,9 @@ function showLightbox(){
   img.onerror = () => { if (img.getAttribute('src') !== cur.full) img.src = cur.full; };
   $('#lb-open').href = cur.full;
   $('#lb-count').textContent = lb.list.length > 1 ? `${lb.idx + 1} / ${lb.list.length}` : '';
+  const it = cur.id ? state.items.get(cur.id) : null;
+  $('#lb-who').textContent = it ? `@${it.screen_name}　${it.dt}` : '';
+  $('#lb-goto').hidden = !it;
   const multi = lb.list.length > 1;
   $('#lb-prev').hidden = !multi;
   $('#lb-next').hidden = !multi;
@@ -1943,30 +2141,357 @@ async function setTrashed(id, on){
   renderTabs();
   updateCount();
   appendChunk();
+  syncPlayer();
   toast(on ? '🗑 ゴミ箱へ移動しました（データは残ります）' : '↩ 復元しました');
 }
 
-/* ================= video playback ================= */
-function playVideo(cell){
-  const type = cell.dataset.type;
+/* ================= video playback / ミニプレーヤー =================
+   同時に鳴る動画は常に1つ。<video> 要素も1つだけ作り、カードの枠（インライン）と
+   画面左上のミニ窓の間を「要素ごと」行き来させる。要素を作り直さないので、
+   カードが画面外へ出ても・一覧を描き直しても・フォルダタブを移っても再生が続く。 */
+const MINI_SIZES = [220, 300, 400];
+const player = {
+  video: null,      // 唯一の <video>
+  cell: null,       // いま紐づいている再生枠（カード内 or ギャラリーのタイル）
+  cellHTML: '',     // その枠の元の中身（停止時に戻す）
+  id: '',           // 再生中の投稿 id
+  src: '', type: '',
+  mini: false,      // ミニ窓に入っているか
+  pinned: false,    // ギャラリー発の再生: 常にミニ窓
+  io: null,
+  sizeIdx: 1,
+};
+let miniPos = null;          // ドラッグで動かした位置（未設定なら左上）
+let miniFlashTimer = null;
+
+function applyMiniState(m){
+  if (!m || typeof m !== 'object') return;
+  if (m.pos && typeof m.pos.x === 'number' && typeof m.pos.y === 'number'){
+    miniPos = { x: m.pos.x, y: m.pos.y };
+  }
+  if (Number.isInteger(m.size) && m.size >= 0 && m.size < MINI_SIZES.length) player.sizeIdx = m.size;
+}
+
+/* opts.mini: 再生枠が小さすぎる場所（ギャラリーのタイル）から呼ぶときは最初からミニ窓で */
+function playVideo(cell, opts = {}){
   const src = cell.dataset.original;
-  const video = document.createElement('video');
-  video.src = src;
-  video.controls = true;
-  video.autoplay = true;
-  video.playsInline = true;
-  if (type === 'animated_gif'){ video.loop = true; video.muted = true; }
-  video.addEventListener('error', () => {
-    const fail = document.createElement('div');
-    fail.className = 'm-fail';
-    fail.innerHTML = `動画を読み込めませんでした（元ツイート削除済みの可能性）<br>`
-      + `<a href="${esc(src)}" target="_blank" rel="noopener">直リンクを開く</a>`;
-    cell.innerHTML = '';
-    cell.appendChild(fail);
-  });
+  const type = cell.dataset.type || 'video';
+  if (!src) return;
+  /* 同じ枠をもう一度押したとき: 小窓にいるなら呼び戻し、カード内なら再生 / 一時停止 */
+  if (player.video && player.cell === cell && player.src === src){
+    if (player.mini && !player.pinned) dockInline(); else togglePlay();
+    return;
+  }
+  stopVideo();
+  const host = cell.closest('[data-cid]');
+  player.id = (host && host.dataset.cid) || '';
+  player.src = src;
+  player.type = type;
+  player.pinned = !!opts.mini;
+  player.cell = cell;
+  player.cellHTML = opts.mini ? '' : cell.innerHTML;
+  player.video = createVideo(src, type);
+  if (opts.mini){
+    cell.classList.add('playing');
+    dockMini();
+  } else {
+    dockInline();
+    watchCell();
+  }
+  player.video.play().catch(() => {});
+}
+
+function createVideo(src, type){
+  const v = document.createElement('video');
+  v.src = src;
+  v.controls = true;
+  v.autoplay = true;
+  v.playsInline = true;
+  v.preload = 'metadata';
+  if (type === 'animated_gif'){ v.loop = true; v.muted = true; }
+  v.addEventListener('error', onVideoError);
+  v.addEventListener('play', updateMiniIcon);
+  v.addEventListener('pause', updateMiniIcon);
+  v.addEventListener('timeupdate', updateMiniProgress);
+  v.addEventListener('ended', updateMiniIcon);
+  /* ピクチャーインピクチャー中はボタンを点灯させ、押せば戻せることを示す */
+  v.addEventListener('enterpictureinpicture', () => $('#mini-pip').classList.add('on'));
+  v.addEventListener('leavepictureinpicture', () => $('#mini-pip').classList.remove('on'));
+  return v;
+}
+
+/* 要素を付け替えるとブラウザによっては巻き戻る・止まる（DOM から外れた <video> を
+   一拍おいて止める実装がある）。移動の前後で位置と再生状態を控え、少し後まで見張って戻す。 */
+let resumeSeq = 0;
+function moveVideo(target){
+  const v = player.video;
+  if (!v || !target || v.parentNode === target) return;
+  const at = v.currentTime, playing = !v.paused && !v.ended;
+  target.appendChild(v);
+  if (playing) keepPlaying(v, at); else resumeSeq++;
+}
+function keepPlaying(v, at){
+  const seq = ++resumeSeq;
+  const fix = () => {
+    if (seq !== resumeSeq || player.video !== v || !v.isConnected) return;
+    if (at > 0 && Math.abs(v.currentTime - at) > 0.3){ try { v.currentTime = at; } catch (e){} }
+    if (v.paused && !v.ended) v.play().catch(() => {});
+  };
+  fix();
+  setTimeout(fix, 0);
+  setTimeout(fix, 150);
+}
+
+function dockInline(){
+  const cell = player.cell;
+  if (!player.video) return;
+  if (!cell || !cell.isConnected || player.pinned){ dockMini(); return; }
+  cell.classList.remove('inmini');
   cell.innerHTML = '';
-  cell.appendChild(video);
-  video.play().catch(() => {});
+  moveVideo(cell);
+  player.video.controls = true;
+  player.mini = false;
+  $('#mini').hidden = true;
+}
+
+function dockMini(){
+  if (!player.video) return;
+  const mini = $('#mini'), slot = $('#mini-slot');
+  mini.hidden = false;
+  player.mini = true;
+  player.video.controls = false;      /* 小窓ではクリックで再生 / 一時停止 */
+  moveVideo(slot);
+  slot.appendChild($('#mini-icon'));  /* アイコンは常に映像の上に */
+  /* カード側は空箱にせず、サムネイルへ戻して「小窓で再生中」と出す（クリックで呼び戻せる） */
+  if (!player.pinned && player.cell && player.cell.isConnected && player.cellHTML){
+    player.cell.innerHTML = player.cellHTML;
+    player.cell.classList.add('inmini');
+    const pb = player.cell.querySelector('.playbtn');
+    if (pb) pb.textContent = '⧉ 小窓で再生中（クリックで戻す）';
+  }
+  const it = state.items.get(player.id);
+  $('#mini-ttl').textContent = it ? `@${it.screen_name}` : '再生中';
+  $('#mini-goto').hidden = !it;
+  applyMiniSize();
+  placeMini();
+  updateMiniIcon();
+  updateMiniProgress();
+}
+
+/* 再生枠が画面から出たらミニ窓へ、戻ってきたらカード内へ */
+function watchCell(){
+  if (player.io){ player.io.disconnect(); player.io = null; }
+  if (!('IntersectionObserver' in window) || !player.cell) return;
+  player.io = new IntersectionObserver(entries => {
+    if (!player.video || player.pinned) return;
+    const e = entries[entries.length - 1];
+    if (e.isIntersecting){ if (player.mini) dockInline(); }
+    else if (!player.mini) dockMini();
+  }, { threshold: 0.3 });
+  player.io.observe(player.cell);
+}
+
+/* 一覧を描き直した後に呼ぶ。再生中の枠が新しい DOM にあれば拾い直し、
+   無ければミニ窓のまま鳴らし続ける（タブを移っても止めない） */
+function syncPlayer(){
+  if (!player.video) return;
+  const cell = findPlayCell();
+  if (player.pinned){
+    document.querySelectorAll('.g-cell.playing').forEach(el => el.classList.remove('playing'));
+    player.cell = cell || null;
+    if (cell) cell.classList.add('playing');
+    if (!player.mini) dockMini();
+    return;
+  }
+  if (cell && cell === player.cell && cell.isConnected) return;   /* 変わっていない */
+  if (!player.video.isConnected) dockMini();                      /* カードごと消えた */
+  if (player.io){ player.io.disconnect(); player.io = null; }
+  player.cell = cell || null;
+  if (cell){
+    player.cellHTML = cell.innerHTML;
+    watchCell();
+  }
+}
+
+function findPlayCell(){
+  if (!player.id || !player.src) return null;
+  const sel = `[data-cid="${CSS.escape(player.id)}"]`;
+  const src = CSS.escape(player.src);
+  return document.querySelector(`${sel}[data-original="${src}"]`)
+      || document.querySelector(`${sel} [data-play][data-original="${src}"]`);
+}
+
+function stopVideo(){
+  resumeSeq++;
+  if (player.io){ player.io.disconnect(); player.io = null; }
+  const v = player.video;
+  if (v){
+    if (document.pictureInPictureElement === v){
+      document.exitPictureInPicture().catch(() => {});
+    }
+    v.pause();
+    v.removeAttribute('src');
+    try { v.load(); } catch (e){}
+    if (v.parentNode) v.parentNode.removeChild(v);
+  }
+  if (player.cell){
+    player.cell.classList.remove('playing', 'inmini');
+    /* カード内の枠は元のサムネイルに戻す（ギャラリーのタイルは触らない） */
+    if (!player.pinned && player.cell.isConnected && player.cellHTML){
+      player.cell.innerHTML = player.cellHTML;
+    }
+  }
+  $('#mini').hidden = true;
+  $('#mini-prog').style.width = '0%';
+  $('#mini-pip').classList.remove('on');
+  Object.assign(player, {
+    video: null, cell: null, cellHTML: '', id: '', src: '', type: '', mini: false, pinned: false,
+  });
+}
+
+function onVideoError(){
+  const fail = document.createElement('div');
+  fail.className = 'm-fail';
+  fail.innerHTML = `動画を読み込めませんでした（元ツイート削除済みの可能性）<br>`
+    + `<a href="${esc(player.src)}" target="_blank" rel="noopener">直リンクを開く</a>`;
+  const v = player.video;
+  if (v && v.parentNode) v.parentNode.removeChild(v);
+  if (player.mini){
+    const slot = $('#mini-slot');
+    slot.insertBefore(fail, $('#mini-icon'));
+    $('#mini-ttl').textContent = '再生できません';
+  } else if (player.cell && player.cell.isConnected){
+    player.cell.innerHTML = '';
+    player.cell.appendChild(fail);
+  }
+}
+
+function togglePlay(){
+  const v = player.video;
+  if (!v) return;
+  resumeSeq++;                 /* 付け替え直後の自動再開に上書きされないように */
+  if (v.paused) v.play().catch(() => {}); else v.pause();
+  flashMiniIcon();
+}
+
+function updateMiniIcon(){
+  const v = player.video, icon = $('#mini-icon');
+  if (!v || !icon) return;
+  icon.textContent = v.paused ? '▶' : '⏸';
+  icon.classList.toggle('show', v.paused);   /* 止めている間は出しっぱなし */
+}
+
+function flashMiniIcon(){
+  const icon = $('#mini-icon'), v = player.video;
+  if (!icon || !v) return;
+  icon.textContent = v.paused ? '▶' : '⏸';
+  icon.classList.add('show');
+  clearTimeout(miniFlashTimer);
+  if (!v.paused) miniFlashTimer = setTimeout(() => icon.classList.remove('show'), 600);
+}
+
+function updateMiniProgress(){
+  const v = player.video, el = $('#mini-prog');
+  if (!v || !el || !player.mini) return;
+  const d = v.duration;
+  el.style.width = (d && isFinite(d) && d > 0) ? `${Math.min(100, v.currentTime / d * 100)}%` : '0%';
+}
+
+function seekMini(clientX){
+  const v = player.video;
+  if (!v || !isFinite(v.duration) || !v.duration) return;
+  const r = $('#mini-seek').getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (clientX - r.left - 6) / Math.max(1, r.width - 12)));
+  try { v.currentTime = ratio * v.duration; } catch (e){}
+  updateMiniProgress();
+}
+
+function applyMiniSize(){
+  $('#mini').style.width = MINI_SIZES[player.sizeIdx] + 'px';
+}
+
+function placeMini(){
+  const mini = $('#mini');
+  if (mini.hidden) return;
+  const w = mini.offsetWidth || MINI_SIZES[player.sizeIdx];
+  const h = mini.offsetHeight || 180;
+  const pos = miniPos || { x: 12, y: Math.round(headerH()) + 12 };   /* 既定は左上 */
+  const maxX = Math.max(4, window.innerWidth - w - 4);
+  const maxY = Math.max(4, window.innerHeight - h - 4);
+  mini.style.left = Math.min(Math.max(4, pos.x), maxX) + 'px';
+  mini.style.top = Math.min(Math.max(4, pos.y), maxY) + 'px';
+}
+
+/* 別のタブに移っても映像を残したいとき用。ユーザー操作が要るブラウザが多いので
+   ボタンから呼ぶ（自動で開けた場合はそれも活かす） */
+async function toggleNativePiP(){
+  const v = player.video;
+  if (!v) return;
+  if (!document.pictureInPictureEnabled){
+    toast('この環境ではピクチャーインピクチャーを使えません');
+    return;
+  }
+  try {
+    if (document.pictureInPictureElement === v) await document.exitPictureInPicture();
+    else await v.requestPictureInPicture();
+  } catch (e){
+    toast('ピクチャーインピクチャーを開始できませんでした');
+  }
+}
+
+/* ミニ窓の「↩」: 再生中の投稿をリスト表示で開く（絞り込みで隠れていれば解除する） */
+function jumpToItem(id){
+  const it = state.items.get(id);
+  if (!it){ toast('この投稿は書庫にありません'); return; }
+  const v = state.view;
+  let changed = false;
+  if (v.mode !== 'list'){ v.mode = 'list'; changed = true; }
+  if (!itemMatches(it, v)){
+    Object.assign(v, { q: '', media: false, quote: false, long: false, memo: false, user: null });
+    v.folder = it.tr ? '__trash' : '__all';
+    $('#search').value = '';
+    changed = true;
+    toast('絞り込みを解除してこの投稿へ移動しました');
+  }
+  if (changed){ renderTabs(); renderControls(); renderList(); }
+  restoreToken++;      /* タブ切替直後の位置合わせに引き戻されないようにする */
+  let el = null, guard = 0;
+  const sel = `#list .card[data-cid="${CSS.escape(id)}"]`;
+  while (!(el = document.querySelector(sel)) && state.rendered < state.cur.length && guard++ < 2000){
+    appendChunk();
+  }
+  if (!el) return;
+  window.scrollTo(0, Math.max(0, el.getBoundingClientRect().top + window.scrollY - headerH() - 8));
+}
+
+/* ミニ窓のドラッグ移動 */
+function bindMiniDrag(){
+  const bar = $('#mini-bar'), mini = $('#mini');
+  let dragging = false, dx = 0, dy = 0;
+  bar.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    dragging = true;
+    const r = mini.getBoundingClientRect();
+    dx = e.clientX - r.left;
+    dy = e.clientY - r.top;
+    bar.classList.add('dragging');
+    bar.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  bar.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    miniPos = { x: Math.round(e.clientX - dx), y: Math.round(e.clientY - dy) };
+    placeMini();
+  });
+  const end = e => {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove('dragging');
+    try { bar.releasePointerCapture(e.pointerId); } catch (err){}
+    persistViewState();
+  };
+  bar.addEventListener('pointerup', end);
+  bar.addEventListener('pointercancel', end);
 }
 
 /* ================= triage mode ================= */
@@ -2013,6 +2538,7 @@ function renderTriage(){
     body.innerHTML = cardHTML(triage.queue[triage.idx], { noChips: true, noTrash: true, noMemo: true });
     body.scrollTop = 0;
   }
+  syncPlayer();   /* 次のアイテムへ進んでも、再生中の動画は小窓に残す */
 }
 function triageAssign(folder){
   if (triage.idx >= triage.queue.length) return;
@@ -2073,6 +2599,17 @@ function bindEvents(){
     state.view.seed = newSeed();
     renderList();
   });
+  $('#btn-view').addEventListener('click', () => {
+    if (memoEdit) closeMemoEditor(true);   /* 書きかけのメモを取りこぼさない */
+    captureAnchor();                                   /* いまのモードの位置を確定してから移る */
+    state.view.mode = state.view.mode === 'gallery' ? 'list' : 'gallery';
+    renderControls();
+    renderList('restore');
+  });
+  $('#gmedia').addEventListener('change', e => {
+    state.view.gmedia = e.target.value;
+    renderList();
+  });
   $('#f-media').addEventListener('click', () => { state.view.media = !state.view.media; renderControls(); renderList(); });
   $('#f-quote').addEventListener('click', () => { state.view.quote = !state.view.quote; renderControls(); renderList(); });
   $('#f-long').addEventListener('click', () => { state.view.long = !state.view.long; renderControls(); renderList(); });
@@ -2092,7 +2629,7 @@ function bindEvents(){
   /* リスト上の操作（委譲） */
   $('#list').addEventListener('click', e => {
     const play = e.target.closest('[data-play]');
-    if (play){ playVideo(play); return; }
+    if (play){ playVideo(play, { mini: play.classList.contains('g-cell') }); return; }
     const photo = e.target.closest('a[data-kind-wrap="photo"]');
     if (photo && !e.metaKey && !e.ctrlKey && e.button === 0){
       e.preventDefault();          /* 別タブではなくその場で拡大 */
@@ -2112,7 +2649,10 @@ function bindEvents(){
     if (rb){ setTrashed(rb.dataset.restore, false); return; }
   });
   $('#list').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && e.target.matches('[data-play]')) playVideo(e.target);
+    /* <button> は Enter で click が出るので二重再生させない */
+    if (e.key === 'Enter' && e.target.matches('[data-play]') && e.target.tagName !== 'BUTTON'){
+      playVideo(e.target);
+    }
   });
   /* 罠⑤: 壊れた画像の非表示（error はバブルしないので capture で拾う） */
   document.addEventListener('error', e => {
@@ -2128,7 +2668,7 @@ function bindEvents(){
       return;
     }
     if (kind === 'photo'){
-      const wrap = img.closest('.m-cell');
+      const wrap = img.closest('.m-cell, .g-cell');
       if (wrap) wrap.style.display = 'none';   // 写真は枠ごと非表示
     } else if (kind === 'thumb'){
       img.style.display = 'none';              // 動画はサムネのみ消し、再生枠は残す
@@ -2231,9 +2771,32 @@ function bindEvents(){
   $('#exp-dl').addEventListener('click', downloadExport);
   $('#exp-undo').addEventListener('click', undoExportMark);
 
+  /* ミニプレーヤー */
+  $('#mini-slot').addEventListener('click', togglePlay);
+  $('#mini-slot').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); togglePlay(); }
+  });
+  $('#mini-close').addEventListener('click', stopVideo);
+  $('#mini-pip').addEventListener('click', toggleNativePiP);
+  $('#mini-goto').addEventListener('click', () => jumpToItem(player.id));
+  $('#mini-size').addEventListener('click', () => {
+    player.sizeIdx = (player.sizeIdx + 1) % MINI_SIZES.length;
+    applyMiniSize();
+    placeMini();
+    persistViewState();
+  });
+  $('#mini-seek').addEventListener('pointerdown', e => { e.preventDefault(); seekMini(e.clientX); });
+  bindMiniDrag();
+  window.addEventListener('resize', placeMini);
+
   /* 画像の拡大表示 */
   $('#lb-close').addEventListener('click', closeLightbox);
   $('#lb-img').addEventListener('click', closeLightbox);
+  $('#lb-goto').addEventListener('click', () => {
+    const id = lb.list[lb.idx] && lb.list[lb.idx].id;
+    closeLightbox();
+    if (id) jumpToItem(id);
+  });
   $('#lb-prev').addEventListener('click', () => moveLightbox(-1));
   $('#lb-next').addEventListener('click', () => moveLightbox(1));
   $('#lightbox').addEventListener('click', e => {
@@ -2280,6 +2843,7 @@ function bindEvents(){
       }
       return;
     }
+    if (e.key === 'Escape' && player.video){ e.preventDefault(); stopVideo(); return; }
     if (e.key === '/' && !e.target.matches('input,select,textarea')){
       e.preventDefault();
       $('#search').focus();
@@ -2291,7 +2855,14 @@ function bindEvents(){
 
   /* 閲覧状態の保存タイミング */
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') persistViewStateNow();
+    if (document.visibilityState !== 'hidden') return;
+    persistViewStateNow();
+    /* 別のタブへ移っても映像を残す。ユーザー操作を求めるブラウザでは静かに失敗し、
+       その場合も音声はそのまま鳴り続ける（許可されている環境だけ映像が浮く） */
+    const v = player.video;
+    if (v && !v.paused && document.pictureInPictureEnabled && !document.pictureInPictureElement){
+      v.requestPictureInPicture().catch(() => {});
+    }
   });
   window.addEventListener('pagehide', persistViewStateNow);
 
@@ -2344,6 +2915,8 @@ window.__xbm = {
   importCSV, importJSON,
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
   twimgSized, mediaHTML, avatarHTML, lb, currentAnchor, restoreAnchor, captureAnchor, renderList,
+  player, playVideo, stopVideo, syncPlayer, computeGallery, galleryTileHTML, jumpToItem,
+  miniState: () => ({ pos: miniPos, size: player.sizeIdx }), renderControls,
   storageOk: () => store.ok,
   setMemo, buildExport, exportTargets, memoState, adoptMemo,
   exportOpts: () => exportOpts,
