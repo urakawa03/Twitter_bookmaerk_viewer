@@ -441,7 +441,7 @@ body.gallery main{max-width:none; padding-left:6px; padding-right:6px}
       <option value="photo">写真のみ</option>
       <option value="video">動画のみ</option>
     </select>
-    <button class="tbtn" id="f-media">メディア</button>
+    <button class="tbtn" id="f-media" title="メディアあり（引用RTの中身が写真・動画のものも含む）">メディア</button>
     <button class="tbtn" id="f-quote">引用</button>
     <button class="tbtn" id="f-long">長文</button>
     <button class="tbtn" id="f-memo">メモ</button>
@@ -1327,7 +1327,7 @@ function itemMatches(it, v){
   if (it.tr) return false;
   if (v.folder === '__none'){ if (it.c) return false; }
   else if (v.folder !== '__all' && it.c !== v.folder) return false;
-  if (v.media && !(it.media && it.media.length)) return false;
+  if (v.media && !hasMedia(it)) return false;   /* 引用RTの中身がメディアの投稿も含める */
   if (v.quote && !(it.quoted_id || it.qd)) return false;
   if (v.long && it.text.length < 300) return false;
   if (v.memo && !it.n) return false;
@@ -1439,6 +1439,24 @@ function mediaHTML(media){
   return `<div class="media-grid n${Math.min(media.length, 4)}">${cells}</div>`;
 }
 
+/* 引用元の実体を1か所で解決する（qd → 書庫内の相互参照の順。削除済み・書庫外は null）。
+   カードの入れ子表示・メディア絞り込み・ギャラリーが必ず同じ引用元を見るようにして、
+   「カードには写真が出ているのにギャラリーには並ばない」というズレを作らない */
+function quoteSource(it){
+  if (it.qd) return it.qd.deleted ? null : it.qd;
+  const qid = it.quoted_id;
+  return (qid && state.items.get(qid)) || null;
+}
+/* 引用RTの中身がメディア（写真・動画）のとき、その配列を返す */
+function quoteMedia(it){
+  const q = quoteSource(it);
+  return (q && Array.isArray(q.media)) ? q.media : [];
+}
+/* 「メディアあり」の判定。引用RTの中身がメディアだけの投稿もメディア扱いにする */
+function hasMedia(it){
+  return !!(it.media && it.media.length) || quoteMedia(it).length > 0;
+}
+
 function quoteHTML(it){
   const qid = it.quoted_id || (it.qd && it.qd.id) || '';
   const link = `https://x.com/i/status/${esc(qid)}`;
@@ -1451,8 +1469,8 @@ function quoteHTML(it){
     return `<div class="quote">${quoteInner(it.qd, qid)}</div>`;
   }
   /* (b) 書庫内の相互参照 */
-  if (qid && state.items.has(qid)){
-    const q = state.items.get(qid);
+  const q = quoteSource(it);
+  if (q){
     return `<div class="quote">${quoteInner(q, qid, q.dt)}</div>`;
   }
   /* (c) プレースホルダ */
@@ -1575,21 +1593,38 @@ function isVideoMedia(m){ return m.type === 'video' || m.type === 'animated_gif'
 function computeGallery(){
   const kind = state.view.gmedia;
   const tiles = [];
-  for (const it of state.cur){
-    if (!it.media || !it.media.length) continue;
-    for (const m of it.media){
+  /* 引用元が書庫にあり、いまの一覧にも並んでいるなら、その投稿自身のタイルが出る。
+     同じ写真を二度並べないよう、引用としては足さない */
+  const shown = new Set(state.cur.map(it => it.id));
+  /* q: 引用元（引用RTの中身のメディアなら、その作者。自前のメディアなら null） */
+  const push = (it, media, q) => {
+    for (const m of (media || [])){
       if (!m || (!m.original && !m.thumbnail)) continue;
       const vid = isVideoMedia(m);
       if (kind === 'photo' && vid) continue;
       if (kind === 'video' && !vid) continue;
-      tiles.push({ it, m, vid });
+      tiles.push({ it, m, vid, q });
     }
+  };
+  for (const it of state.cur){
+    push(it, it.media, null);
+    /* 引用RTの中身がメディアのときも、その投稿のタイルとして並べる */
+    const q = quoteSource(it);
+    if (q && !(q.id && shown.has(q.id))) push(it, q.media, q);
   }
   state.gal = tiles;
 }
 
+/* タイルや拡大表示に出す出典。引用RT由来なら引用元の作者を主に見せる */
+function tileWho(t){
+  const q = t.q;
+  const src = q ? (q.screen_name ? `@${q.screen_name}` : '引用元') : `@${t.it.screen_name}`;
+  return { src, full: q ? `${src} の投稿を @${t.it.screen_name} が引用` : src, quoted: !!q };
+}
+
 function galleryTileHTML(t, i){
   const { it, m, vid } = t;
+  const w = tileWho(t);
   /* 表示用の元画像: mp4 は直に表示できないのでサムネイルを使う */
   const base = m.original && !/\.mp4(\?|$)/i.test(m.original) ? m.original : m.thumbnail;
   const ss = /pbs\.twimg\.com/.test(String(base || ''))
@@ -1600,15 +1635,15 @@ function galleryTileHTML(t, i){
     ? `<img data-kind="${vid ? 'thumb' : 'photo'}" data-fb="${esc(m.thumbnail || base)}" loading="lazy"`
       + ` src="${esc(twimgSized(base, 'small'))}"${ss} alt="">`
     : '';
-  const who = `<span class="g-who">@${esc(it.screen_name)}</span>`;
+  const who = `<span class="g-who">${w.quoted ? '💬 ' : ''}${esc(w.src)}</span>`;
   const cell = vid
     ? `<button class="g-cell vid" data-play data-gi="${i}" data-cid="${esc(it.id)}"`
       + ` data-type="${esc(m.type)}" data-original="${esc(m.original)}"`
-      + ` title="クリックで投稿を開いて再生（@${esc(it.screen_name)}）">`
+      + ` title="クリックで投稿を開いて再生（${esc(w.full)}）">`
       + img + `<span class="g-badge">${m.type === 'video' ? '▶ 動画' : 'GIF'}</span>` + who + `</button>`
     : `<a class="g-cell" data-kind-wrap="photo" data-gi="${i}" data-cid="${esc(it.id)}"`
       + ` href="${esc(m.original || base)}" target="_blank" rel="noopener"`
-      + ` title="クリックで拡大（@${esc(it.screen_name)}）">` + img + who + `</a>`;
+      + ` title="クリックで拡大（${esc(w.full)}）">` + img + who + `</a>`;
   /* ⓘ: ギャラリーを離れずに本文・フォルダ・メモを開く */
   return `<div class="g-tile" data-cid="${esc(it.id)}" data-gi="${i}">${cell}`
     + `<button class="g-info" data-info="${i}" title="投稿の内容を見る" aria-label="投稿の内容を見る">ⓘ</button></div>`;
@@ -1952,7 +1987,7 @@ function exportDate(ms, nowYear){
 function exportQuoteLine(it, limit){
   if (!limit) return '';
   const t = (it.text || '').replace(/\s+/g, ' ').trim();
-  if (!t) return (it.media && it.media.length) ? `${EXPORT_INDENT}> （本文なし・メディアのみ）` : '';
+  if (!t) return hasMedia(it) ? `${EXPORT_INDENT}> （本文なし・メディアのみ）` : '';
   const chars = [...t];
   const body = chars.length > limit ? chars.slice(0, limit).join('').replace(/\s+$/, '') + '…' : t;
   return `${EXPORT_INDENT}> ${body}`;
@@ -2183,9 +2218,11 @@ function showLightbox(){
   $('#lb-open').href = cur.full;
   $('#lb-count').textContent = lb.list.length > 1 ? `${lb.idx + 1} / ${lb.list.length}` : '';
   const it = cur.id ? state.items.get(cur.id) : null;
-  $('#lb-who').textContent = it ? `@${it.screen_name}　${it.dt}` : '';
-  $('#lb-goto').hidden = !it;
   const tile = cur.gi != null ? state.gal[cur.gi] : null;
+  /* 引用RT由来のメディアは、誰の写真を誰の引用で見ているのかを添える */
+  const who = tile && tile.q ? `${tileWho(tile).src}（@${it ? it.screen_name : ''} の引用）` : (it ? `@${it.screen_name}` : '');
+  $('#lb-who').textContent = it ? `${who}　${it.dt}` : '';
+  $('#lb-goto').hidden = !it;
   $('#lb-play').hidden = !(tile && tile.vid);
   renderLbInfo();
   const multi = lb.list.length > 1;
@@ -2570,11 +2607,18 @@ function resetLbStage(){
 function playInLightbox(gi){
   const t = state.gal[gi];
   if (!t || !t.vid || !t.m.original) return;
+  playOnStage(t.m.original, t.m.type, t.it.id);
+}
+
+/* 拡大表示のステージで動画を鳴らす。ギャラリーのタイルからも、
+   投稿パネルの中の引用RTの動画からも、同じ枠を使う */
+function playOnStage(original, type, id){
+  if (!original) return;
   if (memoEdit) closeMemoEditor(true);   /* パネルを作り直すので書きかけのメモを取りこぼさない */
   const cell = $('#lb-vcell');
-  cell.dataset.original = t.m.original;
-  cell.dataset.type = t.m.type || 'video';
-  cell.dataset.cid = t.it.id;
+  cell.dataset.original = original;
+  cell.dataset.type = type || 'video';
+  cell.dataset.cid = id || '';
   cell.hidden = false;
   $('#lb-img').hidden = true;
   $('#lb-play').hidden = true;
@@ -2965,6 +3009,19 @@ function bindEvents(){
   $('#lb-info').addEventListener('click', e => {
     const vp = e.target.closest('[data-vplay]');
     if (vp){ playInLightbox(Number(vp.dataset.vplay)); return; }
+    /* パネルに出る引用RTのメディアも、その場で再生・拡大できるようにする */
+    const play = e.target.closest('[data-play]');
+    if (play){
+      const host = play.closest('[data-cid]');
+      playOnStage(play.dataset.original, play.dataset.type, host ? host.dataset.cid : '');
+      return;
+    }
+    const photo = e.target.closest('a[data-kind-wrap="photo"]');
+    if (photo && !e.metaKey && !e.ctrlKey && e.button === 0){
+      e.preventDefault();          /* 別タブではなくステージで拡大 */
+      openLightbox(photo);
+      return;
+    }
     const mh = e.target.closest('[data-memo]');
     if (mh){ openMemoEditor(mh); return; }
     if (e.target.closest('.memo-edit,.memo-hint')) return;
@@ -3101,6 +3158,7 @@ window.__xbm = {
   parseCreatedAt, unescapeText, stripMediaLinks, normalizeUrl, extractQd,
   twimgSized, mediaHTML, avatarHTML, lb, currentAnchor, restoreAnchor, captureAnchor, renderList,
   player, playVideo, stopVideo, syncPlayer, computeGallery, galleryTileHTML, jumpToItem,
+  quoteSource, quoteMedia, hasMedia, itemMatches, quoteHTML,
   miniState: () => ({ pos: miniPos, size: player.sizeIdx }), renderControls,
   openLightbox, toggleLbInfo, lbInfoHTML,
   storageOk: () => store.ok,
