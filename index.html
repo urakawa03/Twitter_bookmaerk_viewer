@@ -13,6 +13,12 @@
   --bg:#f5f6f8; --card:#ffffff; --ink:#15202b; --sub:#5b7083; --line:#e1e8ed;
   --accent:#1d9bf0; --accent-ink:#ffffff; --chip:#eef3f6; --chip-on:#1d9bf0;
   --warn-bg:#fff3cd; --warn-ink:#664d03; --danger:#dc3545;
+  /* レイアウト: 横幅を使い切る3カラムカードの寸法。ヘッダーと本文で同じ --page-w を共有する */
+  --page-w:1400px;      /* ページ全体の上限 */
+  --rail-l:168px;       /* 左レール: 作者・日時 */
+  --rail-r:248px;       /* 右レール: 反応数・フォルダ・メモ */
+  --card-gap:16px;
+  --media-max:300px;    /* カード内メディアの高さ上限 */
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -30,7 +36,7 @@ header{
   position:sticky; top:0; z-index:20; background:var(--card);
   border-bottom:1px solid var(--line); padding:8px 12px 0;
 }
-.hrow{display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:960px; margin:0 auto}
+.hrow{display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:var(--page-w); margin:0 auto}
 .hrow h1{font-size:16px; margin:0 8px 0 0; white-space:nowrap}
 .hrow .count{color:var(--sub); font-size:13px; white-space:nowrap}
 #search{
@@ -46,7 +52,7 @@ select{padding:5px 6px; border:1px solid var(--line); border-radius:8px; font:in
 .tbtn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
 #userchip{background:var(--ink); color:#fff; border-color:var(--ink)}
 .tabs{
-  display:flex; gap:4px; overflow-x:auto; padding:8px 0 8px; max-width:960px; margin:0 auto;
+  display:flex; gap:4px; overflow-x:auto; padding:8px 0 8px; max-width:var(--page-w); margin:0 auto;
   scrollbar-width:thin;
 }
 .tab{
@@ -55,6 +61,17 @@ select{padding:5px 6px; border:1px solid var(--line); border-radius:8px; font:in
 }
 .tab.on{background:var(--ink); color:#fff; border-color:var(--ink)}
 .tab .n{font-size:11px; opacity:.75; margin-left:3px}
+
+/* ⋯ メニュー: 常用しない操作を畳んでヘッダーを1行に保つ */
+.hmenu{position:relative}
+.hmenu-pop{
+  position:absolute; right:0; top:calc(100% + 6px); z-index:30;
+  display:flex; flex-direction:column; gap:4px; min-width:170px; padding:6px;
+  background:var(--card); border:1px solid var(--line); border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.14);
+}
+.hmenu-pop[hidden]{display:none}
+.hmenu-pop .tbtn{border:0; border-radius:8px; text-align:left; padding:7px 10px}
 
 #banner,#fsbanner{
   display:none; background:var(--warn-bg); color:var(--warn-ink);
@@ -67,7 +84,7 @@ select{padding:5px 6px; border:1px solid var(--line); border-radius:8px; font:in
 }
 
 /* ---------- list / card ---------- */
-main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
+main{max-width:var(--page-w); margin:0 auto; padding:12px 8px 80px}
 .empty{color:var(--sub); text-align:center; padding:48px 16px}
 .card{
   background:var(--card); border:1px solid var(--line); border-radius:12px;
@@ -85,19 +102,61 @@ main{max-width:640px; margin:0 auto; padding:12px 8px 80px}
 .body{white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word}
 .hashtag{color:var(--accent); font-weight:600}
 .longmark{font-size:11px; color:var(--sub); border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-left:6px}
+/* 長文バッジは表示名（nowrap + ellipsis）の外に出すので、行頭に置き直す */
+.who .longmark{display:inline-block; margin-left:0; margin-top:2px}
+
+/* ---------- カードの3カラム化 ----------
+   #list のカードだけに当てる。同じ cardHTML() を使う整理モード（#t-body）と、
+   .chead / .cfoot / .fchips / .memo を共有するライトボックスの投稿パネル（.lb-card 幅352px）、
+   引用カード（.quote .chead）を巻き込まないため。
+   .c-who は `chead c-who` の2クラスで出しているので、ここが効かない幅では従来の横一列に戻る。 */
+@media (min-width:860px){
+  /* 2カラム: 作者＋本文 | 反応数・フォルダ・メモ */
+  #list .card{
+    display:grid; grid-template-columns:minmax(0,1fr) var(--rail-r);
+    gap:0 var(--card-gap); align-items:start;
+  }
+  #list .card .c-who {grid-column:1; grid-row:1}
+  #list .card .c-main{grid-column:1; grid-row:2; min-width:0}
+  #list .card .c-side{
+    grid-column:2; grid-row:1 / span 2; min-width:0;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  /* 右レールでは縦積み前提の余白（margin-top / 区切り線）が二重になるので外す */
+  #list .card .c-side > *{margin-top:0; border-top:0; padding-top:0}
+  #list .card .c-side .cfoot{gap:4px 10px}
+  /* .cfoot .sp は flex:1 で「元の投稿」を右端へ押し出すが、狭いレールでは潰れるので改行させる */
+  #list .card .c-side .cfoot .sp{flex:0 0 100%; height:0}
+  #list .card .c-side .memo-edit{min-height:96px}
+  /* 本文カラムいっぱいに動画が広がると1件で画面を使い切るので、メディアだけ幅を抑える */
+  #list .card .media-grid{max-width:640px}
+}
+@media (min-width:1100px){
+  /* 3カラム: 作者 | 本文 | 反応数・フォルダ・メモ */
+  #list .card{grid-template-columns:var(--rail-l) minmax(0,1fr) var(--rail-r)}
+  #list .card .c-who{
+    grid-column:1; grid-row:1;
+    flex-direction:column; align-items:flex-start; gap:2px; margin-bottom:0;
+  }
+  #list .card .c-who .avatar{margin-bottom:2px}
+  #list .card .c-who .who{flex:none; width:100%}
+  #list .card .c-who .dt{text-align:left}
+  #list .card .c-main{grid-column:2; grid-row:1}
+  #list .card .c-side{grid-column:3; grid-row:1}
+}
 
 .media-grid{display:grid; gap:4px; margin-top:8px; border-radius:10px; overflow:hidden}
 .media-grid.n1{grid-template-columns:1fr}
 .media-grid.n2,.media-grid.n3,.media-grid.n4{grid-template-columns:1fr 1fr}
-.m-cell{position:relative; display:block; background:#0f1419; min-height:60px; max-height:420px; overflow:hidden; border-radius:6px}
-.m-cell img{width:100%; height:100%; max-height:420px; object-fit:cover; display:block}
+.m-cell{position:relative; display:block; background:#0f1419; min-height:60px; max-height:var(--media-max); overflow:hidden; border-radius:6px}
+.m-cell img{width:100%; height:100%; max-height:var(--media-max); object-fit:cover; display:block}
 .m-video{cursor:pointer}
 .playbtn{
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   color:#fff; font-weight:700; font-size:15px; text-shadow:0 1px 4px rgba(0,0,0,.8);
   background:rgba(0,0,0,.18);
 }
-.m-cell video{width:100%; max-height:420px; display:block; background:#000}
+.m-cell video{width:100%; max-height:var(--media-max); display:block; background:#000}
 .m-cell.inmini .playbtn{background:rgba(29,155,240,.35); font-size:13px}
 .m-fail{color:#fff; font-size:13px; padding:16px; text-align:center}
 .m-fail a{color:#8ecdf8}
@@ -446,10 +505,15 @@ body.gallery main{max-width:none; padding-left:6px; padding-right:6px}
     <button class="tbtn" id="f-long">長文</button>
     <button class="tbtn" id="f-memo">メモ</button>
     <button class="tbtn" id="userchip" hidden></button>
-    <button class="tbtn" id="btn-triage">整理モード</button>
-    <button class="tbtn" id="btn-export">📤 出力</button>
-    <button class="tbtn primary" id="btn-import">取込</button>
-    <button class="tbtn" id="btn-data">データ管理</button>
+    <div class="hmenu">
+      <button class="tbtn" id="btn-more" aria-haspopup="true" aria-expanded="false" title="操作">⋯</button>
+      <div class="hmenu-pop" id="more-pop" hidden>
+        <button class="tbtn" id="btn-triage">整理モード</button>
+        <button class="tbtn" id="btn-export">📤 出力</button>
+        <button class="tbtn primary" id="btn-import">取込</button>
+        <button class="tbtn" id="btn-data">データ管理</button>
+      </div>
+    </div>
   </div>
   <nav class="tabs" id="tabs" aria-label="フォルダ"></nav>
 </header>
@@ -1403,7 +1467,9 @@ function twimgSized(url, size){
 function imgSrcset(url){
   if (!/pbs\.twimg\.com/.test(String(url || ''))) return '';
   return ` srcset="${esc(twimgSized(url, 'small'))} 680w, ${esc(twimgSized(url, 'medium'))} 1200w, `
-       + `${esc(twimgSized(url, 'large'))} 2048w" sizes="(max-width: 680px) 100vw, 640px"`;
+       + `${esc(twimgSized(url, 'large'))} 2048w" `
+       /* 859px 以下はカード幅いっぱい、860px 以上は .media-grid の max-width(640px) で頭打ち */
+       + `sizes="(max-width:680px) 100vw, (max-width:859px) calc(100vw - 44px), 640px"`;
 }
 
 /* アバターは _normal（48px）だと高DPI画面でぼやけるので大きい版を使う。
@@ -1515,33 +1581,42 @@ function memoBlockHTML(it, readonly){
   return `<div class="memo-view"${hook}>${esc(n)}${memoStampHTML(it)}</div>`;
 }
 
+/* カードは「作者（.c-who）/ 本文（.c-main）/ 反応数・フォルダ・メモ（.c-side）」の3つに分ける。
+   これを横に並べるかどうかは CSS（#list .card のメディアクエリ）が決める。
+   狭い画面と、同じ関数を使う整理モードでは従来どおり縦に積まれる。 */
 function cardHTML(it, opts = {}){
   const chips = folderChipsHTML(it);
   const memo = opts.noMemo ? '' : memoBlockHTML(it, !!it.tr);
   return `<article class="card${it.tr ? ' trashed' : ''}" data-cid="${esc(it.id)}">`
-    + `<div class="chead">`
+    + `<div class="chead c-who">`
     +   avatarHTML(it.avatar, 'avatar')
-    +   `<div class="who"><div class="nm">${esc(it.name)}${it.text.length >= 300 ? '<span class="longmark">長文</span>' : ''}</div>`
-    +     `<div class="hd">${handleHTML(it.screen_name)}</div></div>`
+    +   `<div class="who"><div class="nm">${esc(it.name)}</div>`
+    +     `<div class="hd">${handleHTML(it.screen_name)}</div>`
+    +     (it.text.length >= 300 ? '<span class="longmark">長文</span>' : '')
+    +   `</div>`
     +   `<div class="dt">${esc(it.dt)}<br><span class="tz">${esc(it.tz)}</span></div>`
     + `</div>`
-    + `<div class="body">${renderText(it.text)}</div>`
-    + mediaHTML(it.media)
-    + quoteHTML(it)
-    + `<div class="cfoot">`
-    +   `<span title="いいね">♥ ${fmtNum(it.fav)}</span>`
-    +   `<span title="リポスト">🔁 ${fmtNum(it.rt)}</span>`
-    +   (it.views != null ? `<span title="表示回数">👁 ${fmtNum(it.views)}</span>` : '')
-    +   `<span class="sp"></span>`
-    +   (it.reply_to ? `<a href="https://x.com/i/status/${esc(it.reply_to)}" target="_blank" rel="noopener">返信先</a>` : '')
-    +   `<a href="${esc(it.url)}" target="_blank" rel="noopener">元の投稿</a>`
-    +   (opts.noTrash ? ''
-        : it.tr
-          ? `<button class="trashbtn restore" data-restore="${esc(it.id)}" title="ゴミ箱から戻す">↩ 復元</button>`
-          : `<button class="trashbtn" data-trash="${esc(it.id)}" title="ゴミ箱へ移動（データは残ります）">🗑</button>`)
+    + `<div class="c-main">`
+    +   `<div class="body">${renderText(it.text)}</div>`
+    +   mediaHTML(it.media)
+    +   quoteHTML(it)
     + `</div>`
-    + (memo ? `<div class="memo">${memo}</div>` : '')
-    + (opts.noChips || it.tr ? '' : `<div class="fchips">${chips}</div>`)
+    + `<div class="c-side">`
+    +   `<div class="cfoot">`
+    +     `<span title="いいね">♥ ${fmtNum(it.fav)}</span>`
+    +     `<span title="リポスト">🔁 ${fmtNum(it.rt)}</span>`
+    +     (it.views != null ? `<span title="表示回数">👁 ${fmtNum(it.views)}</span>` : '')
+    +     `<span class="sp"></span>`
+    +     (it.reply_to ? `<a href="https://x.com/i/status/${esc(it.reply_to)}" target="_blank" rel="noopener">返信先</a>` : '')
+    +     `<a href="${esc(it.url)}" target="_blank" rel="noopener">元の投稿</a>`
+    +     (opts.noTrash ? ''
+          : it.tr
+            ? `<button class="trashbtn restore" data-restore="${esc(it.id)}" title="ゴミ箱から戻す">↩ 復元</button>`
+            : `<button class="trashbtn" data-trash="${esc(it.id)}" title="ゴミ箱へ移動（データは残ります）">🗑</button>`)
+    +   `</div>`
+    +   (opts.noChips || it.tr ? '' : `<div class="fchips">${chips}</div>`)
+    +   (memo ? `<div class="memo">${memo}</div>` : '')
+    + `</div>`
     + `</article>`;
 }
 
@@ -1738,6 +1813,19 @@ function renderTabs(){
   /* ゴミ箱タブ: 中身があるとき、または表示中のときだけ出す */
   if (direct.__trash > 0 || t === '__trash') html += tab('__trash', '🗑 ゴミ箱', direct.__trash);
   $('#tabs').innerHTML = html;
+}
+
+/* ヘッダーの ⋯ メニュー。常用しない操作（整理モード・出力・取込・データ管理）を畳んで
+   .hrow を1行に保ち、その分だけ一覧に使える高さを増やす。 */
+function moreMenuOpen(){ return !$('#more-pop').hidden; }
+function closeMoreMenu(){
+  $('#more-pop').hidden = true;
+  $('#btn-more').setAttribute('aria-expanded', 'false');
+}
+function toggleMoreMenu(){
+  const open = moreMenuOpen();
+  $('#more-pop').hidden = open;
+  $('#btn-more').setAttribute('aria-expanded', String(!open));
 }
 
 function renderControls(){
@@ -2807,6 +2895,13 @@ function bindEvents(){
   $('#f-memo').addEventListener('click', () => { state.view.memo = !state.view.memo; renderControls(); renderList(); });
   $('#userchip').addEventListener('click', () => { state.view.user = null; renderControls(); renderList(); });
 
+  /* ⋯ メニュー: ボタンで開閉し、項目を押すか外側をクリックすると閉じる */
+  $('#btn-more').addEventListener('click', e => { e.stopPropagation(); toggleMoreMenu(); });
+  $('#more-pop').addEventListener('click', () => closeMoreMenu());
+  document.addEventListener('click', e => {
+    if (moreMenuOpen() && !e.target.closest('.hmenu')) closeMoreMenu();
+  });
+
   $('#tabs').addEventListener('click', e => {
     const b = e.target.closest('[data-tab]');
     if (!b) return;
@@ -3066,6 +3161,8 @@ function bindEvents(){
 
   /* キーボード */
   document.addEventListener('keydown', e => {
+    /* ⋯ メニューが開いていれば Esc はまずそれを閉じる */
+    if (e.key === 'Escape' && moreMenuOpen()){ e.preventDefault(); closeMoreMenu(); return; }
     if (lb.open){
       if (e.target.matches('input,textarea')) return;   /* パネルでメモを書いている間は素通し */
       if (e.key === 'Escape'){ e.preventDefault(); closeLightbox(); }
