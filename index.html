@@ -15,10 +15,11 @@
   --warn-bg:#fff3cd; --warn-ink:#664d03; --danger:#dc3545;
   /* レイアウト: 横幅を使い切る3カラムカードの寸法。ヘッダーと本文で同じ --page-w を共有する */
   --page-w:1400px;      /* ページ全体の上限 */
-  --rail-l:168px;       /* 左レール: 作者・日時 */
-  --rail-r:248px;       /* 右レール: 反応数・フォルダ・メモ */
+  --rail-l:148px;       /* 左レール: 作者・日時 */
+  --rail-r:208px;       /* 右レール: 反応数・フォルダ・メモ */
   --card-gap:16px;
   --media-max:300px;    /* カード内メディアの高さ上限 */
+  --card-max:360px;     /* 本文カラムの高さ上限。超えた分は「続きを読む」で開く */
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -130,6 +131,19 @@ main{max-width:var(--page-w); margin:0 auto; padding:12px 8px 80px}
   #list .card .c-side .memo-edit{min-height:96px}
   /* 本文カラムいっぱいに動画が広がると1件で画面を使い切るので、メディアだけ幅を抑える */
   #list .card .media-grid{max-width:640px}
+  /* 引用は本文カラムいっぱいの灰色の箱になりがちなので、中身の幅に寄せる */
+  #list .card .quote{max-width:640px}
+
+  /* 本文カラムの高さを打ち切り、溢れた分は「続きを読む」で開く。
+     カードごとの高さのばらつきが減り、1画面に入る件数が安定する。
+     切るのは .c-main だけ（レールは中身が短いので切ると欠ける）。 */
+  #list .card .c-main{position:relative; max-height:var(--card-max); overflow:hidden}
+  #list .card.open .c-main{max-height:none; padding-bottom:32px}
+  #list .card.can-expand:not(.open) .c-main::after{
+    content:''; position:absolute; left:0; right:0; bottom:0; height:64px;
+    background:linear-gradient(rgba(255,255,255,0), var(--card)); pointer-events:none;
+  }
+  #list .card.can-expand .c-more{display:inline-block}
 }
 @media (min-width:1100px){
   /* 3カラム: 作者 | 本文 | 反応数・フォルダ・メモ */
@@ -143,6 +157,37 @@ main{max-width:var(--page-w); margin:0 auto; padding:12px 8px 80px}
   #list .card .c-who .dt{text-align:left}
   #list .card .c-main{grid-column:2; grid-row:1}
   #list .card .c-side{grid-column:3; grid-row:1}
+  /* 枠線があると、中身の短いレールが「空っぽの箱」として目立つ。
+     淡い影に置き換えて、空いた分を余白として読ませる */
+  #list .card{border-color:transparent; box-shadow:0 1px 3px rgba(21,32,43,.07)}
+}
+
+/* 「続きを読む」。既定は非表示で、溢れているカード（.can-expand）だけに出る。
+   #list の外（整理モード・ライトボックスの投稿パネル）には出ない。 */
+.c-more{
+  display:none; position:absolute; left:0; bottom:0; z-index:2;
+  border:1px solid var(--line); background:var(--card); color:var(--accent);
+  border-radius:12px; padding:2px 12px; font-size:12px;
+}
+
+/* フォルダチップ: 既定（狭い画面・タッチ・整理モード・投稿パネル）は全部その場に並べる。
+   広い画面のカードだけ、割当済みの1個に畳んでホバーで浮かせる（下の hover:hover を参照）。 */
+.fchip-cur{display:none}
+.fchip-all{display:flex; gap:6px 10px; flex-wrap:wrap}
+.fchip-none{background:transparent; border-style:dashed}
+@media (min-width:860px) and (hover:hover){
+  #list .card .fchips{position:relative}
+  #list .card .fchip-cur{display:block}
+  /* その場で開くとカード高が変わって並びが跳ねるので、浮かせて重ねる */
+  #list .card .fchip-all{
+    position:absolute; right:0; top:-6px; z-index:5;
+    width:max-content; max-width:330px; padding:6px;
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    box-shadow:0 8px 24px rgba(0,0,0,.14);
+    opacity:0; pointer-events:none; transition:opacity .12s;
+  }
+  #list .card:hover .fchip-all,
+  #list .card:focus-within .fchip-all{opacity:1; pointer-events:auto}
 }
 
 .media-grid{display:grid; gap:4px; margin-top:8px; border-radius:10px; overflow:hidden}
@@ -1559,11 +1604,17 @@ function quoteInner(q, qid, dt){
     + (qid ? `<div style="margin-top:4px"><a href="https://x.com/i/status/${esc(qid)}" target="_blank" rel="noopener" style="font-size:12px">元の投稿</a></div>` : '');
 }
 
-/* フォルダチップ: フォルダは並列。名前に / があってもただの文字として扱う */
+/* フォルダチップ: フォルダは並列。名前に / があってもただの文字として扱う。
+   フォルダが増えると全カードに同じボタンが並んで一覧のノイズになるため、
+   広い画面では「割当済みの1個」だけ出し、残りはホバー/フォーカスで浮かせる（CSS 側で切替）。 */
 function folderChipsHTML(it){
-  return state.folders.map(f =>
+  const all = state.folders.map(f =>
     `<button class="fchip${it.c === f ? ' on' : ''}" data-assign="${esc(f)}" data-id="${esc(it.id)}" title="${it.c === f ? '割当を解除' : 'このフォルダに割当'}">${esc(f)}</button>`
   ).join('');
+  const cur = it.c
+    ? `<button class="fchip on" data-assign="${esc(it.c)}" data-id="${esc(it.id)}" title="割当を解除">${esc(it.c)}</button>`
+    : `<button class="fchip fchip-none" type="button" title="フォルダ一覧を開く">＋ 分類</button>`;
+  return `<div class="fchip-cur">${cur}</div><div class="fchip-all">${all}</div>`;
 }
 
 /* メモの「出力済」印。出力後に編集されていればそう出し分ける（思考の変化を残すため消さない） */
@@ -1596,11 +1647,13 @@ function cardHTML(it, opts = {}){
     +   `</div>`
     +   `<div class="dt">${esc(it.dt)}<br><span class="tz">${esc(it.tz)}</span></div>`
     + `</div>`
-    + `<div class="c-main">`
+    /* .c-inner は高さを打ち切られない内側の箱。ここを ResizeObserver で見張って
+       「続きを読む」の要否を決める（.c-main 自身は max-height で止まるため測れない） */
+    + `<div class="c-main"><div class="c-inner">`
     +   `<div class="body">${renderText(it.text)}</div>`
     +   mediaHTML(it.media)
     +   quoteHTML(it)
-    + `</div>`
+    + `</div><button class="c-more" data-more="${esc(it.id)}">続きを読む</button></div>`
     + `<div class="c-side">`
     +   `<div class="cfoot">`
     +     `<span title="いいね">♥ ${fmtNum(it.fav)}</span>`
@@ -1640,6 +1693,7 @@ function renderList(mode = 'top', anchor = null){
   document.body.classList.toggle('gallery', gallery);
   const list = $('#list');
   list.className = gallery ? 'gallery-grid' : '';
+  if (mainRO) mainRO.disconnect();   /* これから捨てる .c-inner の監視を切る */
   list.innerHTML = '';
   state.rendered = 0;
   if (gallery){
@@ -1767,6 +1821,28 @@ function updateCount(){
     ? `${total} 件` : `${shown} / ${total} 件`;
 }
 
+/* 本文カラムが上限を超えているカードにだけ「続きを読む」を出す。
+   CSS では溢れを検出できず、画像が遅れて読み込まれて高さが変わるので、
+   切られていない .c-inner の高さを ResizeObserver で追う。 */
+let mainRO = null;
+function observeMains(root){
+  if (typeof ResizeObserver === 'undefined') return;
+  if (!mainRO){
+    mainRO = new ResizeObserver(entries => {
+      for (const en of entries){
+        const main = en.target.parentElement;
+        const card = main && main.closest('.card');
+        if (!card || card.classList.contains('open')) continue;
+        card.classList.toggle('can-expand', en.target.offsetHeight - main.clientHeight > 4);
+      }
+    });
+  }
+  root.querySelectorAll('.c-inner:not([data-ro])').forEach(el => {
+    el.dataset.ro = '1';
+    mainRO.observe(el);
+  });
+}
+
 function appendChunk(){
   if (state.view.mode === 'gallery') return appendGalleryChunk();
   const list = $('#list');
@@ -1776,6 +1852,7 @@ function appendChunk(){
   for (let i = state.rendered; i < end; i++) html += cardHTML(state.cur[i]);
   list.insertAdjacentHTML('beforeend', html);
   state.rendered = end;
+  observeMains(list);
   syncPlayer();
 }
 
@@ -1964,9 +2041,10 @@ async function assignFolder(id, folder){
   it.cAt = it.c ? Date.now() : 0;
   await saveItems([it]);
   renderTabs();
-  /* 表示中のカードのチップだけ更新（リスト再構築を避ける） */
-  document.querySelectorAll(`.card[data-cid="${CSS.escape(id)}"] .fchip, .lb-card[data-cid="${CSS.escape(id)}"] .fchip`).forEach(b => {
-    b.classList.toggle('on', b.dataset.assign === it.c);
+  /* 表示中のカードのチップだけ更新（リスト再構築を避ける）。
+     「割当済みの1個」の表示も入れ替わるので、.fchips ごと作り直す */
+  document.querySelectorAll(`.card[data-cid="${CSS.escape(id)}"] .fchips, .lb-card[data-cid="${CSS.escape(id)}"] .fchips`).forEach(box => {
+    box.innerHTML = folderChipsHTML(it);
   });
   renderDataDialog();
 }
@@ -2939,6 +3017,18 @@ function bindEvents(){
     if (photo && !e.metaKey && !e.ctrlKey && e.button === 0){
       e.preventDefault();          /* 別タブではなくその場で拡大 */
       openLightbox(photo);
+      return;
+    }
+    const more = e.target.closest('[data-more]');
+    if (more){
+      const card = more.closest('.card');
+      const open = card.classList.toggle('open');
+      more.textContent = open ? '折りたたむ' : '続きを読む';
+      /* 畳んだときは溢れ判定をやり直す（開いている間は判定を止めているため） */
+      if (!open){
+        const inner = card.querySelector('.c-inner'), main = card.querySelector('.c-main');
+        if (inner && main) card.classList.toggle('can-expand', inner.offsetHeight - main.clientHeight > 4);
+      }
       return;
     }
     const mh = e.target.closest('[data-memo]');
