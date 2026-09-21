@@ -14,7 +14,7 @@
   --accent:#1d9bf0; --accent-ink:#ffffff; --chip:#eef3f6; --chip-on:#1d9bf0;
   --warn-bg:#fff3cd; --warn-ink:#664d03; --danger:#dc3545;
   /* レイアウト: 横幅を使い切る3カラムカードの寸法。ヘッダーと本文で同じ --page-w を共有する */
-  --page-w:1400px;      /* ページ全体の上限 */
+  --page-w:1250px;      /* ページ全体の上限。中央カラムが中身の幅に見合う所で止める */
   --rail-l:148px;       /* 左レール: 作者・日時 */
   --rail-r:208px;       /* 右レール: 反応数・フォルダ・メモ */
   --card-gap:16px;
@@ -129,10 +129,9 @@ main{max-width:var(--page-w); margin:0 auto; padding:12px 8px 80px}
   /* .cfoot .sp は flex:1 で「元の投稿」を右端へ押し出すが、狭いレールでは潰れるので改行させる */
   #list .card .c-side .cfoot .sp{flex:0 0 100%; height:0}
   #list .card .c-side .memo-edit{min-height:96px}
-  /* 本文カラムいっぱいに動画が広がると1件で画面を使い切るので、メディアだけ幅を抑える */
-  #list .card .media-grid{max-width:640px}
-  /* 引用は本文カラムいっぱいの灰色の箱になりがちなので、中身の幅に寄せる */
-  #list .card .quote{max-width:640px}
+  /* メディアと引用は本文カラムを埋める。幅を頭打ちにすると右側に死角ができ、
+     「横に広いのに中身が細い」という第1ラウンドの失敗に戻ってしまう。
+     高さは --media-max で抑えているので、幅を許しても1件で画面は埋まらない。 */
 
   /* 本文カラムの高さを打ち切り、溢れた分は「続きを読む」で開く。
      カードごとの高さのばらつきが減り、1画面に入る件数が安定する。
@@ -1513,8 +1512,10 @@ function imgSrcset(url){
   if (!/pbs\.twimg\.com/.test(String(url || ''))) return '';
   return ` srcset="${esc(twimgSized(url, 'small'))} 680w, ${esc(twimgSized(url, 'medium'))} 1200w, `
        + `${esc(twimgSized(url, 'large'))} 2048w" `
-       /* 859px 以下はカード幅いっぱい、860px 以上は .media-grid の max-width(640px) で頭打ち */
-       + `sizes="(max-width:680px) 100vw, (max-width:859px) calc(100vw - 44px), 640px"`;
+       /* メディアは本文カラムを埋めるので、その実寸を渡す。
+          859px 以下はカード幅いっぱい、1100px 以上は --page-w から両レールを引いた 816px で頭打ち */
+       + `sizes="(max-width:680px) 100vw, (max-width:859px) calc(100vw - 44px), `
+       + `(max-width:1099px) calc(100vw - 270px), 816px"`;
 }
 
 /* アバターは _normal（48px）だと高DPI画面でぼやけるので大きい版を使う。
